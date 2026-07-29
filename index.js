@@ -1,3 +1,4 @@
+const http = require('http');
 const {
   Client,
   GatewayIntentBits,
@@ -18,13 +19,7 @@ const {
 } = require('discord.js');
 
 // --- ⚠️ CONFIGURATION ⚠️ ---
-const GUILD_ID = '1371775026264670228'; // Your Single Server ID
-
-// --- SUPPORT ROLES FOR EACH TICKET TYPE ---
-const ULTRA_SUPPORT_ROLE = '1529499021884919858';
-const FARM_SUPPORT_ROLE = '1529499059596038285';
-const CONCERN_SUPPORT_ROLE = '1529498802149392614';
-// ---------------------------
+const GUILD_ID = '1371775026264670228'; // Server ID
 
 const client = new Client({
   intents: [
@@ -47,23 +42,9 @@ const snipes = new Map();
 const afkUsers = new Map();
 const uwuTargets = new Set();
 const stickyMessages = new Map();
+const helperPoints = new Map(); // Helper points: userId -> point count
 
-// --- HELPER: TIME PARSER ---
-function parseDuration(str) {
-  if (!str) return null;
-  const unit = str.slice(-1);
-  const value = parseInt(str.slice(0, -1));
-  if (isNaN(value)) return null;
-  switch (unit) {
-    case 's': return value * 1000;
-    case 'm': return value * 60 * 1000;
-    case 'h': return value * 60 * 60 * 1000;
-    case 'd': return value * 24 * 60 * 60 * 1000;
-    default: return null;
-  }
-}
-
-// --- HELPER: UWU TRANSLATOR ---
+// --- UWU TRANSLATOR ---
 function uwuify(text) {
   const faces = ['(・`ω´・)', ';;w;;', 'owo', 'UwU', '>w<', '^w^'];
   return text.replace(/(?:r|l)/g, 'w').replace(/(?:R|L)/g, 'W').replace(/n([aeiou])/g, 'ny$1').replace(/N([aeiou])/g, 'Ny$1').replace(/N([AEIOU])/g, 'Ny$1').replace(/ove/g, 'uv').replace(/!+/g, ' ' + faces[Math.floor(Math.random() * faces.length)] + ' ');
@@ -71,112 +52,165 @@ function uwuify(text) {
 
 // --- SLASH COMMAND DEFINITIONS ---
 const commands = [
-  { name: 'ping', description: 'Check bot latency' }, 
-  {
-    name: 'talk',
-    description: 'Make the bot say something',
-    options: [
-      { name: 'message', description: 'What should I say?', type: 3, required: true },
-      { name: 'channel', description: 'Where? (Optional)', type: 7, required: false }
-    ],
-    default_member_permissions: '8'
-  },
+  { name: 'ping', description: 'Check bot latency' },
   { name: 'me', description: 'Credits & Info' },
-  {
-    name: 'embed',
-    description: 'Create a custom embedded message with Shift+Enter support',
-    options: [
-      { name: 'channel', description: 'Where to send it?', type: 7, required: false }
-    ],
-    default_member_permissions: '8'
-  },
-  { name: 'mute', description: 'Mute user', options: [{ name: 'user', description: 'User', type: 6, required: true }, { name: 'duration', description: 'e.g. 10s, 5m', type: 3, required: false }], default_member_permissions: '8' },
-  { name: 'unmute', description: 'Unmute user', options: [{ name: 'user', description: 'User', type: 6, required: true }], default_member_permissions: '8' },
-  { name: 'ban', description: 'Ban user', options: [{ name: 'user', description: 'User', type: 6, required: true }, { name: 'reason', description: 'Reason', type: 3, required: false }], default_member_permissions: '8' },
-  { name: 'kick', description: 'Kick user', options: [{ name: 'user', description: 'User', type: 6, required: true }, { name: 'reason', description: 'Reason', type: 3, required: false }], default_member_permissions: '8' },
-  { name: 'purge', description: 'Delete messages', options: [{ name: 'amount', description: 'Amount', type: 4, required: true }], default_member_permissions: '8' },
-  { name: 'lock', description: 'Lock channel', default_member_permissions: '8' },
-  { name: 'unlock', description: 'Unlock channel', default_member_permissions: '8' },
-  { name: 'deafen', description: 'Deafen user', options: [{ name: 'user', description: 'User', type: 6, required: true }], default_member_permissions: '8' },
-  { name: 'undeafen', description: 'Undeafen user', options: [{ name: 'user', description: 'User', type: 6, required: true }], default_member_permissions: '8' },
-  { name: 'setprefix', description: 'Change prefix', options: [{ name: 'new_prefix', description: 'Symbol', type: 3, required: true }], default_member_permissions: '8' },
-  { name: 'uwulock', description: 'Force a user to speak UwU', options: [{ name: 'user', description: 'User to lock', type: 6, required: true }], default_member_permissions: '8' },
-  { name: 'uwuunlock', description: 'Free a user from UwU', options: [{ name: 'user', description: 'User to unlock', type: 6, required: true }], default_member_permissions: '8' },
-  { name: 'stick', description: 'Create a reminder', options: [{ name: 'message', description: 'Text', type: 3, required: true }], default_member_permissions: '8' },
-  { name: 'unstick', description: 'Remove reminder', default_member_permissions: '8' },
-  { name: 'afk', description: 'Set status to AFK', options: [{ name: 'reason', description: 'Reason', type: 3, required: false }] },
-  { name: 'snipe', description: 'Show last deleted msg' },
-  { name: 'help', description: 'Show commands' },
-  { name: 'userinfo', description: 'Get user info', options: [{ name: 'user', description: 'User', type: 6, required: false }] },
-  { name: 'avatar', description: 'Get avatar of a user', options: [{ name: 'user', description: 'Select user', type: 6, required: false }] },
-  { name: 'welcome-setup', description: 'Setup welcome message', options: [{ name: 'channel', description: 'Channel', type: 7, required: true }, { name: 'message', description: 'Message', type: 3, required: false }, { name: 'type', description: 'Style', type: 3, required: false, choices: [{ name: 'Text', value: 'text' }, { name: 'Embed', value: 'embed' }] }, { name: 'image_url', description: 'Image Link (GIF/PNG) for Embed', type: 3, required: false }, { name: 'color', description: 'Hex Color (e.g. #FF0000)', type: 3, required: false }], default_member_permissions: '8' },
-  { name: 'leave-setup', description: 'Setup leave message', options: [{ name: 'channel', description: 'Channel', type: 7, required: true }, { name: 'message', description: 'Message', type: 3, required: false }], default_member_permissions: '8' },
   { 
-    name: 'ticketsetup', 
-    description: 'Create the multi-button ticket panel', 
+    name: 'setprefix', 
+    description: 'Change prefix for text commands', 
+    options: [{ name: 'new_prefix', description: 'Symbol', type: 3, required: true }], 
+    default_member_permissions: '8' 
+  },
+  { 
+    name: 'embed', 
+    description: 'Create a custom embed using multi-line modal input',
+    options: [{ name: 'channel', description: 'Channel to send embed', type: 7, required: false }],
+    default_member_permissions: '8' 
+  },
+  { 
+    name: 'ticket-setup', 
+    description: 'Setup the AQW In-Game Help Ticket Panel', 
     options: [
-      { name: 'channel', description: 'Where to post the panel', type: 7, required: true }, 
-      { name: 'category', description: 'Where to open ticket channels', type: 7, channel_types: [4], required: false }
+      { name: 'channel', description: 'Target channel', type: 7, required: true },
+      { name: 'category', description: 'Category for tickets', type: 7, channel_types: [4], required: false }
     ], 
     default_member_permissions: '8' 
   },
   { 
     name: 'verify-setup', 
-    description: 'Setup the AQW Verification Panel', 
+    description: 'Setup AQW Verification Panel', 
     options: [
-      { name: 'channel', description: 'Where to post the verify button', type: 7, required: true },
-      { name: 'log_channel', description: 'Where verification logs will go', type: 7, required: true },
-      { name: 'verified_role', description: 'Role given after verification', type: 8, required: true }
+      { name: 'channel', description: 'Where to post button', type: 7, required: true },
+      { name: 'log_channel', description: 'Verification log channel', type: 7, required: true },
+      { name: 'verified_role', description: 'Role assigned upon approval', type: 8, required: true }
     ], 
     default_member_permissions: '8' 
   },
-  { name: 'autoreact-setup', description: 'Auto-react setup', options: [{ name: 'emoji', description: 'Which emoji?', type: 3, required: true }, { name: 'role', description: 'Optional: Filter by this Role', type: 8, required: false }], default_member_permissions: '8' },
-  { name: 'autorole-setup', description: 'Set auto role', options: [{ name: 'role', description: 'Role to give new members', type: 8, required: true }], default_member_permissions: '8' },
-  { name: 'skullboard-setup', description: 'Skullboard setup', options: [{ name: 'channel', description: 'Where to log skulls', type: 7, required: true }], default_member_permissions: '8' },
-  { name: 'boost-setup', description: 'Set boost announcement', options: [{ name: 'channel', description: 'Where to announce boosts', type: 7, required: true }, { name: 'message', description: 'Custom msg (Use {user})', type: 3, required: false }], default_member_permissions: '8' },
+  { 
+    name: 'welcome-setup', 
+    description: 'Configure embed welcome screen', 
+    options: [{ name: 'channel', description: 'Target channel', type: 7, required: true }], 
+    default_member_permissions: '8' 
+  },
+  { 
+    name: 'leave-setup', 
+    description: 'Configure embed leave message', 
+    options: [{ name: 'channel', description: 'Target channel', type: 7, required: true }], 
+    default_member_permissions: '8' 
+  },
+  { 
+    name: 'boost-setup', 
+    description: 'Configure embed boost message', 
+    options: [{ name: 'channel', description: 'Target channel', type: 7, required: true }], 
+    default_member_permissions: '8' 
+  },
   { 
     name: 'reactionrole', 
-    description: 'Create a panel with up to 5 role buttons', 
+    description: 'Create a button reaction-role panel', 
+    options: [{ name: 'channel', description: 'Channel', type: 7, required: true }], 
+    default_member_permissions: '8' 
+  },
+  { 
+    name: 'points', 
+    description: 'Manage helper points', 
     options: [
-      { name: 'title', description: 'Embed title', type: 3, required: true },
-      { name: 'description', description: 'Embed main text', type: 3, required: true },
-      { name: 'role1', description: 'First role', type: 8, required: true },
-      { name: 'emoji1', description: 'Emoji for button 1', type: 3, required: false },
-      { name: 'role2', description: 'Second role', type: 8, required: false },
-      { name: 'emoji2', description: 'Emoji for button 2', type: 3, required: false },
-      { name: 'role3', description: 'Third role', type: 8, required: false },
-      { name: 'emoji3', description: 'Emoji for button 3', type: 3, required: false },
-      { name: 'role4', description: 'Fourth role', type: 8, required: false },
-      { name: 'emoji4', description: 'Emoji for button 4', type: 3, required: false },
-      { name: 'role5', description: 'Fifth role', type: 8, required: false },
-      { name: 'emoji5', description: 'Emoji for button 5', type: 3, required: false }
+      { 
+        name: 'add', 
+        description: 'Add points to a helper', 
+        type: 1, 
+        options: [
+          { name: 'user', description: 'Helper', type: 6, required: true },
+          { name: 'amount', description: 'Points to add', type: 4, required: true }
+        ] 
+      },
+      { 
+        name: 'remove', 
+        description: 'Remove points from a helper', 
+        type: 1, 
+        options: [
+          { name: 'user', description: 'Helper', type: 6, required: true },
+          { name: 'amount', description: 'Points to remove', type: 4, required: true }
+        ] 
+      },
+      { 
+        name: 'reset', 
+        description: 'Reset all helper points or a single user', 
+        type: 1, 
+        options: [{ name: 'user', description: 'Optional user to reset', type: 6, required: false }] 
+      }
     ], 
     default_member_permissions: '8' 
-  }
+  },
+  { name: 'leaderboard', description: 'Show helper points leaderboard' },
+  { name: 'kick', description: 'Kick a member', options: [{ name: 'user', description: 'Target user', type: 6, required: true }, { name: 'reason', description: 'Reason', type: 3, required: false }], default_member_permissions: '8' },
+  { name: 'ban', description: 'Ban a member', options: [{ name: 'user', description: 'Target user', type: 6, required: true }, { name: 'reason', description: 'Reason', type: 3, required: false }], default_member_permissions: '8' },
+  { name: 'mute', description: 'Mute a member', options: [{ name: 'user', description: 'Target user', type: 6, required: true }], default_member_permissions: '8' },
+  { name: 'lock', description: 'Lock current channel', default_member_permissions: '8' },
+  { name: 'unlock', description: 'Unlock current channel', default_member_permissions: '8' },
+  { name: 'purge', description: 'Clear messages', options: [{ name: 'amount', description: 'Amount (1-100)', type: 4, required: true }], default_member_permissions: '8' },
+  { name: 'stick', description: 'Stick a reminder message', options: [{ name: 'message', description: 'Content', type: 3, required: true }], default_member_permissions: '8' },
+  { name: 'unstick', description: 'Remove sticky message from channel', default_member_permissions: '8' },
+  { name: 'snipe', description: 'Show recently deleted message' }
 ];
 
-// --- STARTUP ---
+// --- BOT STARTUP ---
 client.once(Events.ClientReady, async () => {
   console.log(`Logged in as ${client.user.tag}`);
-  client.user.setActivity('syntry send dih', { type: ActivityType.Listening });
-  const rest = new REST().setToken(client.token);
-  
-  try {
-    if (GUILD_ID === 'PASTE_YOUR_SERVER_ID_HERE') {
-      console.log('⚠️ ERROR: YOU FORGOT TO PASTE YOUR SERVER ID AT THE TOP!');
-    } else {
-      console.log('Clearing global commands...');
-      await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+  client.user.setActivity('AQW Help Tickets', { type: ActivityType.Watching });
 
-      console.log('Registering commands to target server...');
-      await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
-      console.log('Commands successfully refreshed and registered.');
-    }
-  } catch (error) { console.error('Slash error:', error); }
+  const rest = new REST().setToken(client.token);
+  try {
+    console.log('Refreshing application (/) commands...');
+    await rest.put(Routes.applicationCommands(client.user.id), { body: [] }); // Clear global
+    await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
+    console.log('Commands successfully registered to Guild!');
+  } catch (error) {
+    console.error('Error refreshing slash commands:', error);
+  }
+});
+
+// --- WELCOME EMBED HANDLER ---
+client.on('guildMemberAdd', async (member) => {
+  const cfg = guildSettings.get(member.guild.id);
+  if (!cfg || !cfg.welcomeChannelId) return;
+
+  const channel = member.guild.channels.cache.get(cfg.welcomeChannelId);
+  if (!channel) return;
+
+  const title = cfg.welcomeTitle || `Welcome to ${member.guild.name}!`;
+  let desc = cfg.welcomeDesc || `Hey there, ${member}! We're glad to have you here.`;
+  desc = desc.replace('{user}', `${member}`).replace('{server}', member.guild.name).replace('{count}', member.guild.memberCount);
+
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(desc)
+    .setColor('#f1c40f')
+    .setFooter({ text: `Member #${member.guild.memberCount}` })
+    .setTimestamp();
+
+  if (cfg.welcomeImage) embed.setImage(cfg.welcomeImage);
+
+  await channel.send({ embeds: [embed] });
+});
+
+// --- LEAVE EMBED HANDLER ---
+client.on('guildMemberRemove', async (member) => {
+  const cfg = guildSettings.get(member.guild.id);
+  if (!cfg || !cfg.leaveChannelId) return;
+
+  const channel = member.guild.channels.cache.get(cfg.leaveChannelId);
+  if (!channel) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle('Member Left')
+    .setDescription(`**${member.user.tag}** has left the server.`)
+    .setColor('#e74c3c')
+    .setTimestamp();
+
+  await channel.send({ embeds: [embed] });
 });
 
 // --- TRACK DELETED MESSAGES FOR SNIPE ---
-client.on('messageDelete', message => {
+client.on('messageDelete', (message) => {
   if (message.author?.bot) return;
   snipes.set(message.channel.id, {
     content: message.content,
@@ -185,33 +219,31 @@ client.on('messageDelete', message => {
   });
 });
 
-// --- PREFIX HANDLER (!) ---
-client.on('messageCreate', async message => {
+// --- PREFIX MESSAGE HANDLER ---
+client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild || message.guild.id !== GUILD_ID) return;
 
-  // 1. UWU LOCK
+  // 1. UwU Lock
   if (uwuTargets.has(message.author.id)) {
     try {
       await message.delete();
       const uwuText = uwuify(message.content);
-      const nickname = message.member ? message.member.displayName : message.author.username;
-      await message.channel.send(`**${nickname}**: ${uwuText}`);
-      return;
+      return await message.channel.send(`**${message.member ? message.member.displayName : message.author.username}**: ${uwuText}`);
     } catch (e) {}
   }
 
-  // 2. STICKY MESSAGE RE-POST
+  // 2. Sticky Message
   if (stickyMessages.has(message.channel.id)) {
     const stickyData = stickyMessages.get(message.channel.id);
     if (stickyData.lastMsgId) message.channel.messages.delete(stickyData.lastMsgId).catch(() => {});
-    const sentSticky = await message.channel.send(`**reminder**\n${stickyData.content}`);
+    const sentSticky = await message.channel.send(`**Reminder**\n${stickyData.content}`);
     stickyData.lastMsgId = sentSticky.id;
     stickyMessages.set(message.channel.id, stickyData);
   }
 
-  // 3. AFK NOTIFICATIONS
+  // 3. AFK Handler
   if (message.mentions.users.size > 0) {
-    message.mentions.users.forEach(user => {
+    message.mentions.users.forEach((user) => {
       if (afkUsers.has(user.id)) {
         message.reply(`**${user.username}** is AFK: ${afkUsers.get(user.id).reason}`);
       }
@@ -222,849 +254,541 @@ client.on('messageCreate', async message => {
     message.reply(`Welcome back **${message.author.username}**! AFK status removed.`);
   }
 
-  // 4. AUTO REACT
+  // 4. Prefix Command Parser
   const config = guildSettings.get(message.guild.id);
-  if (config && config.autoReactRoles && message.member) {
-      message.member.roles.cache.forEach(role => {
-          if (config.autoReactRoles.has(role.id)) {
-              const emoji = config.autoReactRoles.get(role.id);
-              const emojiId = emoji.match(/<a?:.+?:(\d+)>/) ? emoji.match(/<a?:.+?:(\d+)>/)[1] : emoji;
-              message.react(emojiId).catch(() => {});
-          }
-      });
-  }
-
-  // 5. PREFIX COMMAND PROCESSING
   const serverPrefix = config?.prefix || defaultPrefix;
   if (!message.content.startsWith(serverPrefix)) return;
 
   const args = message.content.slice(serverPrefix.length).trim().split(/ +/);
   const command = args.shift().toLowerCase();
 
-  try {
-    if (command === 'ping') return message.reply(`Pong! ${Math.round(client.ws.ping)}ms`);
-    
-    if (command === 'talk') {
-        if(!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return message.reply("❌ You need Admin permissions.");
-        message.delete().catch(()=>{});
-        return message.channel.send(args.join(' ') || 'What should I say?');
-    }
-    
-    if (command === 'ban') {
-        if(!message.member.permissions.has(PermissionsBitField.Flags.BanMembers)) return message.reply("❌ You need Ban Members permission.");
-        const target = message.mentions.members.first();
-        if(!target) return message.reply('Mention someone to ban.');
-        if(!target.bannable) return message.reply('❌ Cannot ban target.');
-        await target.ban(); 
-        message.reply(`Banned **${target.user.tag}**`);
-    }
-    
-    if (command === 'kick') {
-        if(!message.member.permissions.has(PermissionsBitField.Flags.KickMembers)) return message.reply("❌ You need Kick Members permission.");
-        const target = message.mentions.members.first();
-        if(!target) return message.reply('Mention someone to kick.');
-        if(!target.kickable) return message.reply('❌ Cannot kick target.');
-        await target.kick(); 
-        message.reply(`Kicked **${target.user.tag}**`);
-    }
-
-    if (command === 'help') {
-        const embed = new EmbedBuilder().setTitle('Bot Command Manual').setColor(0x00AAFF).setDescription(`**Prefix:** \`${serverPrefix}\`\nUse \`/\` for Slash Commands or \`${serverPrefix}\` for text commands.`);
-        message.reply({embeds:[embed]});
-    }
-
-    if (command === 'userinfo') {
-        const member = message.mentions.members.first() || message.member;
-        const embed = new EmbedBuilder().setTitle(`User: ${member.user.tag}`).addFields({name:'Joined', value: `<t:${Math.floor(member.joinedTimestamp/1000)}:R>`}).setColor(0x00AAFF);
-        message.reply({embeds:[embed]});
-    }
-
-    if (command === 'afk') {
-        const reason = args.join(' ') || 'No reason specified';
-        afkUsers.set(message.author.id, { reason, time: Date.now() });
-        message.reply(`Set your AFK status: ${reason}`);
-    }
-
-    if (command === 'snipe') {
-        const snipedMsg = snipes.get(message.channel.id);
-        if (!snipedMsg) return message.reply('❌ Nothing to snipe!');
-        const embed = new EmbedBuilder().setAuthor({ name: snipedMsg.author.tag, iconURL: snipedMsg.author.displayAvatarURL() }).setDescription(snipedMsg.content || '*(Attachment)*').setColor(0xFF0000).setFooter({text:'Deleted recently'});
-        if(snipedMsg.image) embed.setImage(snipedMsg.image);
-        message.reply({ embeds: [embed] });
-    }
-  } catch (e) { console.error('Prefix Error:', e); }
+  if (command === 'ping') return message.reply(`Pong! ${Math.round(client.ws.ping)}ms`);
+  if (command === 'snipe') {
+    const snipedMsg = snipes.get(message.channel.id);
+    if (!snipedMsg) return message.reply('❌ Nothing to snipe!');
+    const embed = new EmbedBuilder()
+      .setAuthor({ name: snipedMsg.author.tag, iconURL: snipedMsg.author.displayAvatarURL() })
+      .setDescription(snipedMsg.content || '*(Attachment)*')
+      .setColor('#e74c3c');
+    if (snipedMsg.image) embed.setImage(snipedMsg.image);
+    return message.reply({ embeds: [embed] });
+  }
 });
 
 // --- INTERACTION HANDLER ---
-client.on('interactionCreate', async interaction => {
+client.on('interactionCreate', async (interaction) => {
   if (!interaction.guild || interaction.guild.id !== GUILD_ID) return;
 
-  // BUTTON CLICK HANDLER
+  // A. BUTTON HANDLER
   if (interaction.isButton()) {
-    // 1. REACTION ROLE BUTTON HANDLER
+    // Reaction Roles
     if (interaction.customId.startsWith('rr_')) {
-        const roleId = interaction.customId.split('_')[1];
-        const role = interaction.guild.roles.cache.get(roleId);
-        
-        if (!role) {
-          return interaction.reply({ content: '❌ Target role no longer exists.', ephemeral: true });
-        }
+      const roleId = interaction.customId.split('_')[1];
+      const role = interaction.guild.roles.cache.get(roleId);
+      if (!role) return interaction.reply({ content: '❌ Role no longer exists.', ephemeral: true });
 
-        try {
-          if (interaction.member.roles.cache.has(roleId)) {
-              await interaction.member.roles.remove(roleId);
-              return interaction.reply({ content: `Removed role: **${role.name}**`, ephemeral: true });
-          } else {
-              await interaction.member.roles.add(roleId);
-              return interaction.reply({ content: `Added role: **${role.name}**`, ephemeral: true });
-          }
-        } catch (err) {
-          return interaction.reply({ content: '❌ Failed to update role. Check bot hierarchy/permissions.', ephemeral: true });
-        }
+      if (interaction.member.roles.cache.has(roleId)) {
+        await interaction.member.roles.remove(roleId);
+        return interaction.reply({ content: `Removed role: **${role.name}**`, ephemeral: true });
+      } else {
+        await interaction.member.roles.add(roleId);
+        return interaction.reply({ content: `Added role: **${role.name}**`, ephemeral: true });
+      }
     }
 
-    // 2. AQW VERIFY BUTTON HANDLER (MODAL WITH GUILD FIELD)
-    if (interaction.customId === 'start_verification') {
-        const modal = new ModalBuilder().setCustomId('aqw_verify_modal').setTitle('AQW Verification');
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                    .setCustomId('aqw_name')
-                    .setLabel('AQW Username')
-                    .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('Enter your exact in-game character name')
-                    .setRequired(true)
-            ),
-            new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                    .setCustomId('aqw_guild')
-                    .setLabel('Guild Name')
-                    .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('Enter your AQW Guild name (or None)')
-                    .setRequired(true)
-            ),
-            new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                    .setCustomId('aqw_inviter')
-                    .setLabel('Who invited you? (Optional)')
-                    .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('Username of person who invited you')
-                    .setRequired(false)
-            )
-        );
-        return await interaction.showModal(modal);
+    // Ticket Selection Buttons (Matching 2nd Photo)
+    if (interaction.customId.startsWith('tselect_')) {
+      const categoryName = interaction.customId.replace('tselect_', '');
+      
+      const modal = new ModalBuilder()
+        .setCustomId(`modal_openticket_${categoryName}`)
+        .setTitle(`Ticket: ${categoryName.toUpperCase()}`);
+
+      const descInput = new TextInputBuilder()
+        .setCustomId('ticket_user_desc')
+        .setLabel('Describe what you need help with')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Enter in-game name, server, room number, or problem details...')
+        .setRequired(true);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(descInput));
+      return await interaction.showModal(modal);
     }
 
-    // 3. ADMIN APPROVE VERIFICATION BUTTON
-    if (interaction.customId.startsWith('v_approve_')) {
-        if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return interaction.reply({ content: '❌ Only staff/admins can approve verification requests.', ephemeral: true });
-        }
-        await interaction.deferReply({ ephemeral: true });
-
-        const parts = interaction.customId.split('_');
-        const userId = parts[2];
-        const ign = parts[3];
-
-        const config = guildSettings.get(interaction.guild.id) || {};
-        const targetMember = await interaction.guild.members.fetch(userId).catch(() => null);
-
-        if (targetMember) {
-            if (config.verifyRoleId) {
-                await targetMember.roles.add(config.verifyRoleId).catch(() => {});
-            }
-            await targetMember.setNickname(ign).catch(() => {});
-            await interaction.editReply(`✅ Approved verification for ${targetMember.user.tag} (${ign})!`);
-            
-            const oldEmbed = interaction.message.embeds[0];
-            const updatedEmbed = EmbedBuilder.from(oldEmbed)
-                .setColor(0x00FF00)
-                .setFooter({ text: `Approved by ${interaction.user.tag}` });
-
-            const disabledRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('done_app').setLabel(`Approved by ${interaction.user.username}`).setStyle(ButtonStyle.Success).setDisabled(true)
-            );
-            await interaction.message.edit({ embeds: [updatedEmbed], components: [disabledRow] });
-        } else {
-            interaction.editReply('❌ User is no longer in this server.');
-        }
-        return;
-    }
-
-    // 4. ADMIN REJECT VERIFICATION BUTTON
-    if (interaction.customId.startsWith('v_reject_')) {
-        if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return interaction.reply({ content: '❌ Only staff/admins can reject verification requests.', ephemeral: true });
-        }
-        await interaction.deferReply({ ephemeral: true });
-
-        const userId = interaction.customId.split('_')[2];
-        const targetMember = await interaction.guild.members.fetch(userId).catch(() => null);
-
-        if (targetMember) {
-            await targetMember.setNickname(null).catch(() => {});
-            await interaction.editReply(`❌ Rejected verification for ${targetMember.user.tag}.`);
-            
-            const oldEmbed = interaction.message.embeds[0];
-            const updatedEmbed = EmbedBuilder.from(oldEmbed)
-                .setColor(0xFF0000)
-                .setFooter({ text: `Rejected by ${interaction.user.tag}` });
-
-            const disabledRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('done_rej').setLabel(`Rejected by ${interaction.user.username}`).setStyle(ButtonStyle.Danger).setDisabled(true)
-            );
-            await interaction.message.edit({ embeds: [updatedEmbed], components: [disabledRow] });
-        } else {
-            interaction.editReply('❌ User is no longer in this server.');
-        }
-        return;
-    }
-
-    // 5. TICKET OPEN BUTTON HANDLER
-    if (['ticket_ultra', 'ticket_farm', 'ticket_concern'].includes(interaction.customId)) {
-        const type = interaction.customId.replace('ticket_', '');
-        const chName = `${type}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
-        
-        if (interaction.guild.channels.cache.find(c => c.name === chName)) {
-            return interaction.reply({ content: `❌ You already have an open ${type} ticket!`, ephemeral: true });
-        }
-
-        const modal = new ModalBuilder().setCustomId(`modal_${type}`).setTitle(`Open ${type.toUpperCase()} Ticket`);
-
-        if (type === 'ultra' || type === 'farm') {
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_ign').setLabel('IGN').setStyle(TextInputStyle.Short).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_server').setLabel('SERVER').setStyle(TextInputStyle.Short).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_maproom').setLabel('MAP & ROOM NO.').setStyle(TextInputStyle.Short).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_desc').setLabel('DESC').setStyle(TextInputStyle.Paragraph).setRequired(true))
-            );
-        } else { // Concern / Support
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_subject').setLabel('Subject').setStyle(TextInputStyle.Short).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_desc').setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(true))
-            );
-        }
-
-        await interaction.showModal(modal);
-    }
-
-    // 6. TICKET CLOSE BUTTON HANDLER
+    // Close Ticket Button
     if (interaction.customId === 'close_ticket') {
-        await interaction.reply('🔒 Closing ticket...');
-        setTimeout(() => interaction.channel.delete().catch(()=>{}), 3000);
+      await interaction.reply('🔒 Closing ticket in 3 seconds...');
+      setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
+      return;
     }
-    return;
+
+    // Verification Submit Trigger
+    if (interaction.customId === 'start_verification') {
+      const modal = new ModalBuilder().setCustomId('aqw_verify_modal').setTitle('AQW Verification');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('aqw_name').setLabel('AQW Username').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('aqw_guild').setLabel('Guild Name').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('aqw_inviter').setLabel('Who invited you?').setStyle(TextInputStyle.Short).setRequired(false))
+      );
+      return await interaction.showModal(modal);
+    }
+
+    // Verification Approve/Reject
+    if (interaction.customId.startsWith('v_approve_')) {
+      const [, , userId, ign] = interaction.customId.split('_');
+      const cfg = guildSettings.get(interaction.guild.id) || {};
+      const targetMember = await interaction.guild.members.fetch(userId).catch(() => null);
+
+      if (targetMember) {
+        if (cfg.verifyRoleId) await targetMember.roles.add(cfg.verifyRoleId).catch(() => {});
+        await targetMember.setNickname(ign).catch(() => {});
+        const oldEmbed = interaction.message.embeds[0];
+        const updated = EmbedBuilder.from(oldEmbed).setColor('#2ecc71').setFooter({ text: `Approved by ${interaction.user.tag}` });
+        await interaction.update({ embeds: [updated], components: [] });
+      }
+      return;
+    }
+
+    if (interaction.customId.startsWith('v_reject_')) {
+      const oldEmbed = interaction.message.embeds[0];
+      const updated = EmbedBuilder.from(oldEmbed).setColor('#e74c3c').setFooter({ text: `Rejected by ${interaction.user.tag}` });
+      await interaction.update({ embeds: [updated], components: [] });
+      return;
+    }
   }
 
-  // MODAL SUBMISSIONS
+  // B. MODAL SUBMISSIONS
   if (interaction.isModalSubmit()) {
-    // A. VERIFICATION PANEL SETUP MODAL
-    if (interaction.customId.startsWith('verify_modal_')) {
-        await interaction.deferReply({ ephemeral: true });
-        
-        const parts = interaction.customId.split('_');
-        const channelId = parts[2];
-        const logChannelId = parts[3];
-        const roleId = parts[4];
-
-        const title = interaction.fields.getTextInputValue('verify_title');
-        const desc = interaction.fields.getTextInputValue('verify_desc');
-
-        const channel = interaction.guild.channels.cache.get(channelId);
-
-        const cfg = guildSettings.get(interaction.guildId) || {};
-        cfg.verifyLogChannelId = logChannelId;
-        cfg.verifyRoleId = roleId;
-        guildSettings.set(interaction.guildId, cfg);
-
-        const embed = new EmbedBuilder()
-            .setTitle(title)
-            .setDescription(desc)
-            .setColor(0x00FF00);
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('start_verification')
-                .setLabel('Verify Account')
-                .setStyle(ButtonStyle.Success)
-                .setEmoji('✅')
-        );
-
-        if (channel) {
-            await channel.send({ embeds: [embed], components: [row] });
-            interaction.editReply(`Verification panel successfully posted to ${channel}!`);
-        } else {
-            interaction.editReply('❌ Could not find target channel.');
-        }
-        return;
-    }
-
-    // B. AQW VERIFICATION USER SUBMISSION
-    if (interaction.customId === 'aqw_verify_modal') {
-        await interaction.deferReply({ ephemeral: true });
-
-        const ign = interaction.fields.getTextInputValue('aqw_name').trim();
-        const guildInput = interaction.fields.getTextInputValue('aqw_guild')?.trim() || 'None';
-        const inviterInput = interaction.fields.getTextInputValue('aqw_inviter')?.trim() || '';
-
-        const config = guildSettings.get(interaction.guild.id) || {};
-        
-        try {
-            await interaction.member.setNickname(ign);
-        } catch (e) {
-            console.log("Could not change nickname.");
-        }
-
-        let inviterText = 'None';
-        if (inviterInput) {
-            const foundInviter = interaction.guild.members.cache.find(m => 
-                m.user.username.toLowerCase() === inviterInput.toLowerCase() || 
-                m.displayName.toLowerCase() === inviterInput.toLowerCase()
-            );
-
-            if (foundInviter) {
-                inviterText = `${foundInviter} invited me`;
-            } else {
-                inviterText = `${inviterInput} invited me`;
-            }
-        }
-
-        const logRoleText = config.verifyRoleId ? `<@&${config.verifyRoleId}>` : '@unknown-role';
-        const charPageUrl = `https://account.aq.com/CharPage?id=${encodeURIComponent(ign)}`;
-
-        const logEmbed = new EmbedBuilder()
-            .setTitle('📋 New Verification Request')
-            .setColor(0xFFA500)
-            .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
-            .addFields(
-                { name: 'User', value: `${interaction.user}`, inline: true },
-                { name: 'AQW Username', value: `[${ign}](${charPageUrl})`, inline: true },
-                { name: 'Guild', value: guildInput, inline: true },
-                { name: 'Role To Give', value: logRoleText, inline: true },
-                { name: 'Invited By', value: inviterText, inline: true }
-            )
-            .setTimestamp();
-
-        const adminActionRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`v_approve_${interaction.user.id}_${ign}`)
-                .setLabel('Approve Verification')
-                .setStyle(ButtonStyle.Success)
-                .setEmoji('✅'),
-            new ButtonBuilder()
-                .setCustomId(`v_reject_${interaction.user.id}`)
-                .setLabel('Reject')
-                .setStyle(ButtonStyle.Danger)
-                .setEmoji('✖️')
-        );
-
-        if (config.verifyLogChannelId) {
-            const logCh = interaction.guild.channels.cache.get(config.verifyLogChannelId);
-            if (logCh) {
-                await logCh.send({ embeds: [logEmbed], components: [adminActionRow] });
-            }
-        }
-
-        return interaction.editReply(`✅ Verification request submitted for **${ign}**! Your nickname has been updated and sent to staff for instant role approval.`);
-    }
-
-    // C. TICKET SETUP MODAL
+    // Ticket Panel Post Modal Handler
     if (interaction.customId.startsWith('ts_modal_')) {
-        await interaction.deferReply({ ephemeral: true });
-        
-        const parts = interaction.customId.split('_');
-        const channelId = parts[2];
-        const categoryId = parts[3];
+      await interaction.deferReply({ ephemeral: true });
+      const [, , channelId, categoryId] = interaction.customId.split('_');
+      const title = interaction.fields.getTextInputValue('panel_title');
+      const desc = interaction.fields.getTextInputValue('panel_desc');
+      const image = interaction.fields.getTextInputValue('panel_image');
 
-        const title = interaction.fields.getTextInputValue('panel_title');
-        const desc = interaction.fields.getTextInputValue('panel_desc');
+      const targetChannel = interaction.guild.channels.cache.get(channelId);
+      if (categoryId !== 'none') {
+        const cfg = guildSettings.get(interaction.guild.id) || {};
+        cfg.ticketCategory = categoryId;
+        guildSettings.set(interaction.guild.id, cfg);
+      }
 
-        const channel = interaction.guild.channels.cache.get(channelId);
-        
-        if (categoryId !== 'none') {
-            const cfg = guildSettings.get(interaction.guildId) || {};
-            cfg.ticketCategory = categoryId;
-            guildSettings.set(interaction.guildId, cfg);
-        }
+      const embed = new EmbedBuilder()
+        .setTitle(title)
+        .setDescription(desc)
+        .setColor('#2b2d31')
+        .setFooter({ text: 'You can only have 1 open ticket at a time.' });
 
-        const embed = new EmbedBuilder().setTitle(title).setDescription(desc).setColor(0x2F3136);
+      if (image && image.startsWith('http')) embed.setImage(image);
 
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('ticket_ultra').setLabel('Ultra Help').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
-          new ButtonBuilder().setCustomId('ticket_farm').setLabel('Farm Help').setStyle(ButtonStyle.Success).setEmoji('👾'),
-          new ButtonBuilder().setCustomId('ticket_concern').setLabel('Support').setStyle(ButtonStyle.Primary).setEmoji('🎟️')
-        );
+      // Category buttons matching image
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('tselect_ultra_weeklies').setLabel('Select').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
+        new ButtonBuilder().setCustomId('tselect_ultra_dailies').setLabel('Select').setStyle(ButtonStyle.Danger).setEmoji('🗡️')
+      );
 
-        if (channel) {
-            await channel.send({ embeds: [embed], components: [row] });
-            interaction.editReply(`Ticket panel successfully posted to ${channel}!`);
-        } else {
-            interaction.editReply('❌ Could not find target channel.');
-        }
-        return;
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('tselect_void_auras').setLabel('Select').setStyle(ButtonStyle.Danger).setEmoji('💀'),
+        new ButtonBuilder().setCustomId('tselect_templeshrine').setLabel('Select').setStyle(ButtonStyle.Primary).setEmoji('⛩️')
+      );
+
+      const row3 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('tselect_7man_bosses').setLabel('Select').setStyle(ButtonStyle.Primary).setEmoji('👥'),
+        new ButtonBuilder().setCustomId('tselect_general_help').setLabel('Select').setStyle(ButtonStyle.Primary).setEmoji('🆘')
+      );
+
+      const row4 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('tselect_training').setLabel('Select').setStyle(ButtonStyle.Success).setEmoji('🎓')
+      );
+
+      await targetChannel.send({ embeds: [embed], components: [row1, row2, row3, row4] });
+      return interaction.editReply('✅ Ticket panel successfully posted!');
     }
 
-    // D. GENERAL EMBED MODAL
+    // Open User Ticket Modal Handler
+    if (interaction.customId.startsWith('modal_openticket_')) {
+      await interaction.deferReply({ ephemeral: true });
+      const category = interaction.customId.replace('modal_openticket_', '');
+      const userDesc = interaction.fields.getTextInputValue('ticket_user_desc');
+      const cfg = guildSettings.get(interaction.guild.id) || {};
+
+      const chName = `ticket-${category}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
+
+      const ticketChannel = await interaction.guild.channels.create({
+        name: chName,
+        type: ChannelType.GuildText,
+        parent: cfg.ticketCategory || null,
+        permissionOverwrites: [
+          { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+          { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+        ]
+      });
+
+      const embed = new EmbedBuilder()
+        .setTitle(`🎫 Help Ticket: ${category.toUpperCase()}`)
+        .setDescription(`**Requested By:** ${interaction.user}\n\n**Details:**\n${userDesc}`)
+        .setColor('#3498db')
+        .setTimestamp();
+
+      const closeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
+      );
+
+      await ticketChannel.send({ content: `${interaction.user}`, embeds: [embed], components: [closeRow] });
+      return interaction.editReply(`Ticket channel created: ${ticketChannel}`);
+    }
+
+    // Embed Modal Submission
     if (interaction.customId.startsWith('embed_modal_')) {
-        await interaction.deferReply({ ephemeral: true });
-        const channelId = interaction.customId.split('_')[2];
-        const channel = interaction.guild.channels.cache.get(channelId) || interaction.channel;
+      await interaction.deferReply({ ephemeral: true });
+      const channelId = interaction.customId.split('_')[2];
+      const targetChannel = interaction.guild.channels.cache.get(channelId) || interaction.channel;
 
-        const title = interaction.fields.getTextInputValue('embed_title');
-        const desc = interaction.fields.getTextInputValue('embed_desc');
-        const color = interaction.fields.getTextInputValue('embed_color') || '#0099FF';
-        const image = interaction.fields.getTextInputValue('embed_image');
-        const footer = interaction.fields.getTextInputValue('embed_footer');
+      const title = interaction.fields.getTextInputValue('embed_title');
+      const desc = interaction.fields.getTextInputValue('embed_desc');
+      const image = interaction.fields.getTextInputValue('embed_image');
 
-        const embed = new EmbedBuilder().setColor(color.startsWith('#') ? color : `#${color}`);
-        if (title) embed.setTitle(title);
-        if (desc) embed.setDescription(desc);
-        if (image) embed.setImage(image);
-        if (footer) embed.setFooter({ text: footer });
+      const embed = new EmbedBuilder().setDescription(desc).setColor('#3498db');
+      if (title) embed.setTitle(title);
+      if (image && image.startsWith('http')) embed.setImage(image);
 
-        if (channel) {
-            await channel.send({ embeds: [embed] });
-            interaction.editReply('Custom embed successfully posted!');
-        } else {
-            interaction.editReply('❌ Target channel not found.');
-        }
-        return;
+      await targetChannel.send({ embeds: [embed] });
+      return interaction.editReply('✅ Embed posted!');
     }
 
-    // E. USER TICKET CREATION MODAL
-    if (interaction.customId.startsWith('modal_')) {
-        await interaction.deferReply({ ephemeral: true });
-        const type = interaction.customId.replace('modal_', '');
-        const desc = interaction.fields.getTextInputValue('ticket_desc');
-        const chName = `${type}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
-        const config = guildSettings.get(interaction.guild.id) || {};
-        
-        try {
-            let overwrites = [];
+    // Welcome Setup Modal Submission
+    if (interaction.customId.startsWith('welcome_modal_')) {
+      await interaction.deferReply({ ephemeral: true });
+      const channelId = interaction.customId.split('_')[2];
+      const cfg = guildSettings.get(interaction.guild.id) || {};
 
-            if (type === 'ultra' || type === 'farm') {
-                overwrites = [
-                  { id: interaction.guild.id, allow: [PermissionsBitField.Flags.ViewChannel] }
-                ];
-            } else if (type === 'concern') {
-                overwrites = [
-                  { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] }, 
-                  { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel] }
-                ];
+      cfg.welcomeChannelId = channelId;
+      cfg.welcomeTitle = interaction.fields.getTextInputValue('welcome_title');
+      cfg.welcomeDesc = interaction.fields.getTextInputValue('welcome_desc');
+      cfg.welcomeImage = interaction.fields.getTextInputValue('welcome_image');
 
-                if (CONCERN_SUPPORT_ROLE) {
-                    overwrites.push({
-                        id: CONCERN_SUPPORT_ROLE,
-                        allow: [PermissionsBitField.Flags.ViewChannel]
-                    });
-                }
-            }
+      guildSettings.set(interaction.guild.id, cfg);
+      return interaction.editReply('✅ Welcome Embed configured successfully!');
+    }
 
-            const ch = await interaction.guild.channels.create({
-                name: chName, 
-                type: ChannelType.GuildText, 
-                parent: config.ticketCategory,
-                permissionOverwrites: overwrites
-            });
+    // Verification Modal Setup
+    if (interaction.customId.startsWith('verify_modal_')) {
+      await interaction.deferReply({ ephemeral: true });
+      const [, , chId, logId, roleId] = interaction.customId.split('_');
 
-            const embed = new EmbedBuilder()
-                .setTitle(`Ticket (${type.toUpperCase()})`)
-                .setColor(0x0099FF);
+      const cfg = guildSettings.get(interaction.guild.id) || {};
+      cfg.verifyLogChannelId = logId;
+      cfg.verifyRoleId = roleId;
+      guildSettings.set(interaction.guild.id, cfg);
 
-            if (type === 'ultra' || type === 'farm') {
-                const ign = interaction.fields.getTextInputValue('ticket_ign');
-                const server = interaction.fields.getTextInputValue('ticket_server');
-                const maproom = interaction.fields.getTextInputValue('ticket_maproom');
+      const embed = new EmbedBuilder()
+        .setTitle(interaction.fields.getTextInputValue('verify_title'))
+        .setDescription(interaction.fields.getTextInputValue('verify_desc'))
+        .setColor('#2ecc71');
 
-                embed.setDescription(
-                    `**User:** ${interaction.user}\n` +
-                    `**IGN:** ${ign}\n` +
-                    `**SERVER:** ${server}\n` +
-                    `**MAP & ROOM NO.:** ${maproom}\n` +
-                    `**DESC:** ${desc}`
-                );
-            } else {
-                const subject = interaction.fields.getTextInputValue('ticket_subject');
-                embed.setTitle(`Ticket (${type.toUpperCase()}): ${subject}`);
-                embed.setDescription(`**User:** ${interaction.user}\n**Desc:** ${desc}`);
-            }
-                
-            const btn = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setStyle(ButtonStyle.Danger).setEmoji('🔒')
-            );
-            
-            let mentions = `${interaction.user}`;
-            if (type === 'ultra' && ULTRA_SUPPORT_ROLE) mentions += ` <@&${ULTRA_SUPPORT_ROLE}>`;
-            if (type === 'farm' && FARM_SUPPORT_ROLE) mentions += ` <@&${FARM_SUPPORT_ROLE}>`;
-            if (type === 'concern' && CONCERN_SUPPORT_ROLE) mentions += ` <@&${CONCERN_SUPPORT_ROLE}>`;
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('start_verification').setLabel('Verify Account').setStyle(ButtonStyle.Success).setEmoji('✅')
+      );
 
-            await ch.send({ content: `${mentions}`, embeds: [embed], components: [btn] });
-            interaction.editReply(`Created your ticket: ${ch}`);
-        } catch(e) { 
-            console.error('Ticket Creation Error:', e);
-            interaction.editReply('❌ Error creating ticket channel.'); 
+      const target = interaction.guild.channels.cache.get(chId);
+      await target.send({ embeds: [embed], components: [row] });
+      return interaction.editReply('✅ Verification panel posted!');
+    }
+
+    // Reaction Role Modal Handler
+    if (interaction.customId.startsWith('rr_modal_')) {
+      await interaction.deferReply({ ephemeral: true });
+      const channelId = interaction.customId.split('_')[2];
+      const targetChannel = interaction.guild.channels.cache.get(channelId);
+
+      const title = interaction.fields.getTextInputValue('rr_title');
+      const desc = interaction.fields.getTextInputValue('rr_desc');
+      const rolesInput = interaction.fields.getTextInputValue('rr_roles').split('\n');
+
+      const embed = new EmbedBuilder().setTitle(title).setDescription(desc).setColor('#3498db');
+      const row = new ActionRowBuilder();
+
+      let count = 0;
+      for (const line of rolesInput) {
+        if (count >= 5) break;
+        const [roleId, label] = line.split('|');
+        if (roleId && label) {
+          row.addComponents(
+            new ButtonBuilder().setCustomId(`rr_${roleId.trim()}`).setLabel(label.trim()).setStyle(ButtonStyle.Primary)
+          );
+          count++;
         }
-        return;
+      }
+
+      await targetChannel.send({ embeds: [embed], components: [row] });
+      return interaction.editReply('✅ Reaction Role panel posted!');
     }
   }
 
+  // C. SLASH COMMAND HANDLERS
   if (!interaction.isChatInputCommand()) return;
+  const { commandName, options } = interaction;
 
-  // --- SLASH COMMAND HANDLERS ---
-  try {
-    const { commandName, options } = interaction;
+  // /ticket-setup
+  if (commandName === 'ticket-setup') {
+    const channel = options.getChannel('channel');
+    const category = options.getChannel('category');
 
-    if (commandName === 'verify-setup') {
-        const channel = options.getChannel('channel');
-        const logChannel = options.getChannel('log_channel');
-        const verifiedRole = options.getRole('verified_role');
+    const modal = new ModalBuilder()
+      .setCustomId(`ts_modal_${channel.id}_${category ? category.id : 'none'}`)
+      .setTitle('Ticket Panel Setup');
 
-        const modal = new ModalBuilder()
-            .setCustomId(`verify_modal_${channel.id}_${logChannel.id}_${verifiedRole.id}`)
-            .setTitle('Verification Panel Setup');
+    const titleInput = new TextInputBuilder()
+      .setCustomId('panel_title')
+      .setLabel('Title')
+      .setStyle(TextInputStyle.Short)
+      .setValue('💖 In-Game Help Tickets 💖')
+      .setRequired(true);
 
-        const titleInput = new TextInputBuilder()
-            .setCustomId('verify_title')
-            .setLabel('Panel Title')
-            .setStyle(TextInputStyle.Short)
-            .setValue('AQW Account Verification')
-            .setRequired(true);
+    const descInput = new TextInputBuilder()
+      .setCustomId('panel_desc')
+      .setLabel('Description (Shift + Enter supported!)')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true);
 
-        const descInput = new TextInputBuilder()
-            .setCustomId('verify_desc')
-            .setLabel('Description (Shift + Enter supported!)')
-            .setStyle(TextInputStyle.Paragraph)
-            .setValue('Click the button below to verify your AQW account and get access to the server.')
-            .setRequired(true);
+    const imageInput = new TextInputBuilder()
+      .setCustomId('panel_image')
+      .setLabel('Image Banner URL (Optional)')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false);
 
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(titleInput),
-            new ActionRowBuilder().addComponents(descInput)
-        );
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(titleInput),
+      new ActionRowBuilder().addComponents(descInput),
+      new ActionRowBuilder().addComponents(imageInput)
+    );
 
-        return await interaction.showModal(modal);
+    return await interaction.showModal(modal);
+  }
+
+  // /welcome-setup
+  if (commandName === 'welcome-setup') {
+    const channel = options.getChannel('channel');
+
+    const modal = new ModalBuilder()
+      .setCustomId(`welcome_modal_${channel.id}`)
+      .setTitle('Welcome Embed Setup');
+
+    const titleInput = new TextInputBuilder()
+      .setCustomId('welcome_title')
+      .setLabel('Welcome Title')
+      .setStyle(TextInputStyle.Short)
+      .setValue('Welcome to AQW Community Server!')
+      .setRequired(true);
+
+    const descInput = new TextInputBuilder()
+      .setCustomId('welcome_desc')
+      .setLabel('Description (Shift + Enter supported!)')
+      .setStyle(TextInputStyle.Paragraph)
+      .setValue('Hey there, {user}! We\'re glad to have you here.\n\n🔒 **Get Verified to Unlock the Server!**')
+      .setRequired(true);
+
+    const imageInput = new TextInputBuilder()
+      .setCustomId('welcome_image')
+      .setLabel('Banner Image URL')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(titleInput),
+      new ActionRowBuilder().addComponents(descInput),
+      new ActionRowBuilder().addComponents(imageInput)
+    );
+
+    return await interaction.showModal(modal);
+  }
+
+  // /embed
+  if (commandName === 'embed') {
+    const targetChannel = options.getChannel('channel') || interaction.channel;
+
+    const modal = new ModalBuilder()
+      .setCustomId(`embed_modal_${targetChannel.id}`)
+      .setTitle('Create Custom Embed');
+
+    const titleInput = new TextInputBuilder().setCustomId('embed_title').setLabel('Title (Optional)').setStyle(TextInputStyle.Short).setRequired(false);
+    const descInput = new TextInputBuilder().setCustomId('embed_desc').setLabel('Description (Shift + Enter Supported)').setStyle(TextInputStyle.Paragraph).setRequired(true);
+    const imageInput = new TextInputBuilder().setCustomId('embed_image').setLabel('Image URL (Optional)').setStyle(TextInputStyle.Short).setRequired(false);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(titleInput),
+      new ActionRowBuilder().addComponents(descInput),
+      new ActionRowBuilder().addComponents(imageInput)
+    );
+
+    return await interaction.showModal(modal);
+  }
+
+  // /reactionrole
+  if (commandName === 'reactionrole') {
+    const channel = options.getChannel('channel');
+
+    const modal = new ModalBuilder()
+      .setCustomId(`rr_modal_${channel.id}`)
+      .setTitle('Reaction Role Setup');
+
+    const titleInput = new TextInputBuilder().setCustomId('rr_title').setLabel('Panel Title').setStyle(TextInputStyle.Short).setRequired(true);
+    const descInput = new TextInputBuilder().setCustomId('rr_desc').setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(true);
+    const rolesInput = new TextInputBuilder()
+      .setCustomId('rr_roles')
+      .setLabel('Roles (Format: RoleID | Button Label)')
+      .setStyle(TextInputStyle.Paragraph)
+      .setPlaceholder('1234567890 | Member\n0987654321 | VIP')
+      .setRequired(true);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(titleInput),
+      new ActionRowBuilder().addComponents(descInput),
+      new ActionRowBuilder().addComponents(rolesInput)
+    );
+
+    return await interaction.showModal(modal);
+  }
+
+  // /verify-setup
+  if (commandName === 'verify-setup') {
+    const channel = options.getChannel('channel');
+    const logChannel = options.getChannel('log_channel');
+    const role = options.getRole('verified_role');
+
+    const modal = new ModalBuilder()
+      .setCustomId(`verify_modal_${channel.id}_${logChannel.id}_${role.id}`)
+      .setTitle('Verification Setup');
+
+    const titleInput = new TextInputBuilder().setCustomId('verify_title').setLabel('Title').setStyle(TextInputStyle.Short).setValue('AQW Verification').setRequired(true);
+    const descInput = new TextInputBuilder().setCustomId('verify_desc').setLabel('Description (Shift + Enter)').setStyle(TextInputStyle.Paragraph).setValue('Click below to verify your account.').setRequired(true);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput));
+    return await interaction.showModal(modal);
+  }
+
+  // Helper Points Management (`/points`)
+  if (commandName === 'points') {
+    await interaction.deferReply({ ephemeral: true });
+    const sub = options.getSubcommand();
+    const user = options.getUser('user');
+
+    if (sub === 'add') {
+      const amount = options.getInteger('amount');
+      const current = helperPoints.get(user.id) || 0;
+      helperPoints.set(user.id, current + amount);
+      return interaction.editReply(`Added **${amount}** points to ${user}. New total: **${current + amount}** points.`);
     }
 
-    if (commandName === 'ticketsetup') {
-        const channel = options.getChannel('channel');
-        const category = options.getChannel('category');
-
-        const modal = new ModalBuilder()
-            .setCustomId(`ts_modal_${channel.id}_${category ? category.id : 'none'}`)
-            .setTitle('Ticket Panel Setup');
-
-        const titleInput = new TextInputBuilder()
-            .setCustomId('panel_title')
-            .setLabel('Panel Title')
-            .setStyle(TextInputStyle.Short)
-            .setValue('Please select the specific ticket for your concern.')
-            .setRequired(true);
-
-        const descInput = new TextInputBuilder()
-            .setCustomId('panel_desc')
-            .setLabel('Description (Shift + Enter supported!)')
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true);
-
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(titleInput),
-            new ActionRowBuilder().addComponents(descInput)
-        );
-
-        return await interaction.showModal(modal);
+    if (sub === 'remove') {
+      const amount = options.getInteger('amount');
+      const current = helperPoints.get(user.id) || 0;
+      const newTotal = Math.max(0, current - amount);
+      helperPoints.set(user.id, newTotal);
+      return interaction.editReply(`Removed **${amount}** points from ${user}. New total: **${newTotal}** points.`);
     }
 
-    if (commandName === 'embed') {
-        const targetChannel = options.getChannel('channel') || interaction.channel;
+    if (sub === 'reset') {
+      if (user) {
+        helperPoints.delete(user.id);
+        return interaction.editReply(`Reset points for ${user}.`);
+      } else {
+        helperPoints.clear();
+        return interaction.editReply('Reset helper points leaderboard for all users.');
+      }
+    }
+  }
 
-        const modal = new ModalBuilder()
-            .setCustomId(`embed_modal_${targetChannel.id}`)
-            .setTitle('Create Custom Embed');
-
-        const titleInput = new TextInputBuilder()
-            .setCustomId('embed_title')
-            .setLabel('Title (Optional)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(false);
-
-        const descInput = new TextInputBuilder()
-            .setCustomId('embed_desc')
-            .setLabel('Description (Shift + Enter Supported)')
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true);
-
-        const colorInput = new TextInputBuilder()
-            .setCustomId('embed_color')
-            .setLabel('Hex Color (Optional e.g. #0099FF)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(false);
-
-        const imageInput = new TextInputBuilder()
-            .setCustomId('embed_image')
-            .setLabel('Image URL (Optional)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(false);
-
-        const footerInput = new TextInputBuilder()
-            .setCustomId('embed_footer')
-            .setLabel('Footer Text (Optional)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(false);
-
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(titleInput),
-            new ActionRowBuilder().addComponents(descInput),
-            new ActionRowBuilder().addComponents(colorInput),
-            new ActionRowBuilder().addComponents(imageInput),
-            new ActionRowBuilder().addComponents(footerInput)
-        );
-
-        return await interaction.showModal(modal);
+  // `/leaderboard`
+  if (commandName === 'leaderboard') {
+    await interaction.deferReply();
+    if (helperPoints.size === 0) {
+      return interaction.editReply('No helper points recorded yet.');
     }
 
-    if (commandName === 'purge') {
-        await interaction.deferReply({ ephemeral: true }); 
-        const amt = options.getInteger('amount');
-        if (amt > 100) return interaction.editReply('❌ Max 100.');
-        await interaction.channel.bulkDelete(amt, true).catch(() => interaction.editReply("❌ Error deleting (messages too old?)."));
-        return interaction.editReply(`Deleted ${amt} messages.`);
-    }
+    const sorted = [...helperPoints.entries()].sort((a, b) => b[1] - a[1]);
+    const list = sorted.slice(0, 10).map(([id, pts], idx) => `${idx + 1}. <@${id}> — **${pts}** pts`).join('\n');
 
-    await interaction.deferReply({ ephemeral: false });
+    const embed = new EmbedBuilder()
+      .setTitle('🏆 Helper Leaderboard')
+      .setDescription(list)
+      .setColor('#f1c40f')
+      .setTimestamp();
 
-    if (commandName === 'ping') {
-        interaction.editReply(`Pong! ${Math.round(client.ws.ping)}ms`);
-    } 
-    else if (commandName === 'talk') {
-        await (options.getChannel('channel')||interaction.channel).send(options.getString('message'));
-        interaction.editReply('Sent.');
-    }
-    else if (commandName === 'me') {
-        interaction.editReply('This bot was made out of boredom by **Adlaw**.');
-    }
-    else if (commandName === 'setprefix') {
-        const newPrefix = options.getString('new_prefix');
-        const cfg = guildSettings.get(interaction.guildId) || {};
-        cfg.prefix = newPrefix;
-        guildSettings.set(interaction.guildId, cfg);
-        interaction.editReply(`Prefix changed to: \`${newPrefix}\``);
-    }
-    else if (commandName === 'ban') {
-        const user = options.getMember('user');
-        if(!user.bannable) return interaction.editReply('❌ Cannot ban.');
-        await user.ban({ reason: options.getString('reason') });
-        interaction.editReply(`Banned **${user.user.tag}**`);
-    }
-    else if (commandName === 'kick') {
-        const user = options.getMember('user');
-        if(!user.kickable) return interaction.editReply('❌ Cannot kick.');
-        await user.kick(options.getString('reason'));
-        interaction.editReply(`Kicked **${user.user.tag}**`);
-    }
-    else if (commandName === 'userinfo') {
-        const user = options.getMember('user') || interaction.member;
-        const embed = new EmbedBuilder().setTitle(`User: ${user.user.tag}`).addFields({name:'Joined', value:`<t:${Math.floor(user.joinedTimestamp/1000)}:R>`}).setColor(0x00AAFF);
-        interaction.editReply({embeds:[embed]});
-    }
-    else if (commandName === 'avatar') {
-        const targetUser = options.getUser('user') || interaction.user;
-        const avatarUrl = targetUser.displayAvatarURL({ dynamic: true, size: 1024 });
-        
-        const embed = new EmbedBuilder()
-            .setTitle(`Avatar for ${targetUser.username}`)
-            .setImage(avatarUrl)
-            .setColor(0x00AAFF);
+    return interaction.editReply({ embeds: [embed] });
+  }
 
-        interaction.editReply({ embeds: [embed] });
-    }
-    else if (commandName === 'help') {
-        const embed = new EmbedBuilder().setTitle('Bot Command Manual').setColor(0x00AAFF).setDescription(`**Prefix:** \`${defaultPrefix}\`\nUse \`/\` for Slash Commands or \`${defaultPrefix}\` for text commands.`)
-            .addFields(
-                { name: 'Admin / Mod', value: '`ban`, `kick`, `mute`, `unmute`, `lock`, `unlock`, `purge`\n`deafen`, `undeafen`, `stick`, `unstick`\n`setprefix`, `talk`, `embed`, `uwulock`' },
-                { name: 'Public / Fun', value: '`ping`, `afk`, `snipe`, `userinfo`, `avatar`, `me`, `help`' },
-                { name: 'Setup (Slash Only)', value: '`/ticketsetup`, `/verify-setup`, `/welcome-setup`, `/leave-setup`\n`/autorole-setup`, `/autoreact-setup`\n`/skullboard-setup`, `/reactionrole`, `/boost-setup`' }
-            );
-        interaction.editReply({embeds:[embed]});
-    }
-    else if (commandName === 'autoreact-setup') {
-        const emoji = options.getString('emoji');
-        const role = options.getRole('role');
-        const cfg = guildSettings.get(interaction.guildId) || {};
-        if (!cfg.autoReactRoles) cfg.autoReactRoles = new Map();
-        cfg.autoReactRoles.set(role.id, emoji);
-        guildSettings.set(interaction.guildId, cfg);
-        interaction.editReply(`Auto-react setup for **${role.name}**`);
-    }
-    else if (commandName === 'autorole-setup') {
-        const role = options.getRole('role');
-        const cfg = guildSettings.get(interaction.guildId) || {};
-        cfg.autoRoleId = role.id;
-        guildSettings.set(interaction.guildId, cfg);
-        interaction.editReply(`Auto role set: **${role.name}**`);
-    }
-    else if (commandName === 'welcome-setup') {
-        const ch = options.getChannel('channel');
-        const cfg = guildSettings.get(interaction.guildId) || {};
-        cfg.welcomeChannelId = ch.id;
-        cfg.welcomeMessage = options.getString('message');
-        cfg.welcomeType = options.getString('type');
-        cfg.welcomeImage = options.getString('image_url');
-        cfg.welcomeColor = options.getString('color');
-        guildSettings.set(interaction.guildId, cfg);
-        interaction.editReply('Welcome message configured.');
-    }
-    else if (commandName === 'leave-setup') {
-        const ch = options.getChannel('channel');
-        const cfg = guildSettings.get(interaction.guildId) || {};
-        cfg.leaveChannelId = ch.id;
-        cfg.leaveMessage = options.getString('message');
-        guildSettings.set(interaction.guildId, cfg);
-        interaction.editReply('Leave message configured.');
-    }
-    else if (commandName === 'boost-setup') {
-        const ch = options.getChannel('channel');
-        const cfg = guildSettings.get(interaction.guildId) || {};
-        cfg.boostChannelId = ch.id;
-        cfg.boostMessage = options.getString('message');
-        guildSettings.set(interaction.guildId, cfg);
-        interaction.editReply('Boost message configured.');
-    }
-    else if (commandName === 'skullboard-setup') {
-        const ch = options.getChannel('channel');
-        const cfg = guildSettings.get(interaction.guildId) || {};
-        cfg.skullboardId = ch.id;
-        guildSettings.set(interaction.guildId, cfg);
-        interaction.editReply('Skullboard channel configured.');
-    }
-    else if (commandName === 'reactionrole') {
-        const title = options.getString('title');
-        const desc = options.getString('description');
+  // Moderation Slash Commands (Embed Formatted)
+  if (commandName === 'kick') {
+    await interaction.deferReply({ ephemeral: true });
+    const member = options.getMember('user');
+    if (!member.kickable) return interaction.editReply('❌ Cannot kick user.');
+    await member.kick(options.getString('reason') || 'No reason provided');
+    const embed = new EmbedBuilder().setTitle('User Kicked').setDescription(`Kicked **${member.user.tag}**`).setColor('#e74c3c');
+    return interaction.editReply({ embeds: [embed] });
+  }
 
-        const embed = new EmbedBuilder()
-            .setTitle(title)
-            .setDescription(desc)
-            .setColor(0x0099FF);
+  if (commandName === 'ban') {
+    await interaction.deferReply({ ephemeral: true });
+    const member = options.getMember('user');
+    if (!member.bannable) return interaction.editReply('❌ Cannot ban user.');
+    await member.ban({ reason: options.getString('reason') || 'No reason provided' });
+    const embed = new EmbedBuilder().setTitle('User Banned').setDescription(`Banned **${member.user.tag}**`).setColor('#e74c3c');
+    return interaction.editReply({ embeds: [embed] });
+  }
 
-        const row = new ActionRowBuilder();
+  if (commandName === 'mute') {
+    await interaction.deferReply({ ephemeral: true });
+    const member = options.getMember('user');
+    const role = interaction.guild.roles.cache.find(r => r.name === 'Muted');
+    if (!role) return interaction.editReply('❌ "Muted" role not found.');
+    await member.roles.add(role);
+    const embed = new EmbedBuilder().setTitle('User Muted').setDescription(`Muted **${member.user.tag}**`).setColor('#e74c3c');
+    return interaction.editReply({ embeds: [embed] });
+  }
 
-        for (let i = 1; i <= 5; i++) {
-            const role = options.getRole(`role${i}`);
-            const rawEmoji = options.getString(`emoji${i}`);
+  if (commandName === 'lock') {
+    await interaction.deferReply({ ephemeral: true });
+    await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
+    const embed = new EmbedBuilder().setTitle('Channel Locked').setColor('#e74c3c');
+    return interaction.editReply({ embeds: [embed] });
+  }
 
-            if (role) {
-                const btn = new ButtonBuilder()
-                    .setCustomId(`rr_${role.id}`)
-                    .setLabel(role.name)
-                    .setStyle(ButtonStyle.Primary);
+  if (commandName === 'unlock') {
+    await interaction.deferReply({ ephemeral: true });
+    await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: null });
+    const embed = new EmbedBuilder().setTitle('Channel Unlocked').setColor('#2ecc71');
+    return interaction.editReply({ embeds: [embed] });
+  }
 
-                if (rawEmoji) {
-                    try {
-                        const match = rawEmoji.match(/<a?:.+?:(\d+)>/);
-                        if (match) {
-                            btn.setEmoji(match[1]);
-                        } else {
-                            btn.setEmoji(rawEmoji.trim());
-                        }
-                    } catch (e) {
-                        console.log(`Emoji issue on button ${i}, continuing without it.`);
-                    }
-                }
+  if (commandName === 'purge') {
+    await interaction.deferReply({ ephemeral: true });
+    const amount = options.getInteger('amount');
+    await interaction.channel.bulkDelete(amount, true);
+    return interaction.editReply(`Cleared ${amount} messages.`);
+  }
 
-                row.addComponents(btn);
-            }
-        }
+  if (commandName === 'setprefix') {
+    const newPrefix = options.getString('new_prefix');
+    const cfg = guildSettings.get(interaction.guildId) || {};
+    cfg.prefix = newPrefix;
+    guildSettings.set(interaction.guildId, cfg);
+    return interaction.reply({ content: `Prefix set to \`${newPrefix}\``, ephemeral: true });
+  }
 
-        await interaction.channel.send({ embeds: [embed], components: [row] });
-        interaction.editReply({ content: 'Reaction role panel posted!', ephemeral: true });
-    }
-    else if (commandName === 'mute') {
-        const user = options.getMember('user');
-        const dStr = options.getString('duration');
-        const role = interaction.guild.roles.cache.find(r=>r.name==='Muted');
-        if(!role) return interaction.editReply('❌ "Muted" role missing.');
-        await user.roles.add(role);
-        interaction.editReply(`Muted **${user.user.tag}**`);
-        const ms = parseDuration(dStr);
-        if(ms) setTimeout(()=> user.roles.remove(role).catch(()=>{}), ms);
-    }
-    else if (commandName === 'unmute') {
-        const user = options.getMember('user');
-        const role = interaction.guild.roles.cache.find(r=>r.name==='Muted');
-        await user.roles.remove(role);
-        interaction.editReply('Unmuted.');
-    }
-    else if (commandName === 'lock') {
-        await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
-        interaction.editReply('Locked.');
-    }
-    else if (commandName === 'unlock') {
-        await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: null });
-        interaction.editReply('Unlocked.');
-    }
-    else if (commandName === 'deafen') {
-        const user = options.getMember('user');
-        if(!user.voice.channel) return interaction.editReply('❌ User not in voice channel.');
-        await user.voice.setDeaf(true);
-        interaction.editReply(`Deafened ${user.user.tag}.`);
-    }
-    else if (commandName === 'undeafen') {
-        const user = options.getMember('user');
-        if(!user.voice.channel) return interaction.editReply('❌ User not in voice channel.');
-        await user.voice.setDeaf(false);
-        interaction.editReply(`Undeafened ${user.user.tag}.`);
-    }
-    else if (commandName === 'uwulock') {
-        const target = options.getUser('user');
-        uwuTargets.add(target.id);
-        interaction.editReply(`**${target.username}** is now UwU locked.`);
-    }
-    else if (commandName === 'uwuunlock') {
-        const target = options.getUser('user');
-        uwuTargets.delete(target.id);
-        interaction.editReply(`**${target.username}** is freed from UwU lock.`);
-    }
-    else if (commandName === 'stick') {
-        const text = options.getString('message');
-        const sent = await interaction.channel.send(`**reminder**\n${text}`);
-        stickyMessages.set(interaction.channelId, { content: text, lastMsgId: sent.id });
-        interaction.editReply({content: 'Message stuck!', ephemeral: true});
-    }
-    else if (commandName === 'unstick') {
-        if (stickyMessages.has(interaction.channelId)) {
-            const d = stickyMessages.get(interaction.channelId);
-            interaction.channel.messages.delete(d.lastMsgId).catch(()=>{});
-            stickyMessages.delete(interaction.channelId);
-            interaction.editReply('Reminder removed.');
-        } else {
-            interaction.editReply('❌ No sticky message in this channel.');
-        }
-    }
-    else if (commandName === 'afk') {
-        const reason = options.getString('reason') || 'No reason';
-        afkUsers.set(interaction.user.id, { reason, time: Date.now() });
-        interaction.editReply(`AFK set: ${reason}`);
-    }
-    else if (commandName === 'snipe') {
-        const snipedMsg = snipes.get(interaction.channelId);
-        if (!snipedMsg) return interaction.editReply('❌ Nothing to snipe!');
-        const embed = new EmbedBuilder().setAuthor({ name: snipedMsg.author.tag, iconURL: snipedMsg.author.displayAvatarURL() }).setDescription(snipedMsg.content || '*(Attachment)*').setColor(0xFF0000).setFooter({text:'Deleted recently'});
-        if(snipedMsg.image) embed.setImage(snipedMsg.image);
-        interaction.editReply({ embeds: [embed] });
-    }
-  } catch (err) { interaction.editReply('❌ Error: ' + err.message).catch(()=>{}); }
+  if (commandName === 'ping') return interaction.reply(`Pong! ${Math.round(client.ws.ping)}ms`);
+  if (commandName === 'me') return interaction.reply('Bot maintained by Adlaw.');
 });
 
 // --- CRASH PREVENTION ---
-process.on('unhandledRejection', (reason, p) => console.log('Anti-Crash: ', reason));
-process.on('uncaughtException', (err, origin) => console.log('Anti-Crash: ', err));
+process.on('unhandledRejection', (reason) => console.log('Anti-Crash: ', reason));
+process.on('uncaughtException', (err) => console.log('Anti-Crash: ', err));
 
 // --- LOGIN ---
-console.log('Starting bot, trying to login...');
 client.login(process.env.DISCORD_TOKEN);
 
-const http = require('http');
-
-// Simple HTTP server to keep Render happy
+// --- HTTP SERVER FOR KEEP-ALIVE ---
 http.createServer((req, res) => {
   res.write("Bot is alive!");
   res.end();
