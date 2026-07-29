@@ -12,9 +12,6 @@ const {
   ActionRowBuilder,
   ButtonStyle,      
   ChannelType,
-  ModalBuilder,     
-  TextInputBuilder,  
-  TextInputStyle,
   Partials
 } = require('discord.js');
 
@@ -42,7 +39,7 @@ const snipes = new Map();
 const afkUsers = new Map();
 const uwuTargets = new Set();
 const stickyMessages = new Map();
-const helperPoints = new Map(); // Helper points: userId -> point count
+const helperPoints = new Map();
 
 // --- UWU TRANSLATOR ---
 function uwuify(text) {
@@ -50,7 +47,7 @@ function uwuify(text) {
   return text.replace(/(?:r|l)/g, 'w').replace(/(?:R|L)/g, 'W').replace(/n([aeiou])/g, 'ny$1').replace(/N([aeiou])/g, 'Ny$1').replace(/N([AEIOU])/g, 'Ny$1').replace(/ove/g, 'uv').replace(/!+/g, ' ' + faces[Math.floor(Math.random() * faces.length)] + ' ');
 }
 
-// --- SLASH COMMAND DEFINITIONS ---
+// --- SLASH COMMAND DEFINITIONS (USING PARAMETERS/OPTIONS) ---
 const commands = [
   { name: 'ping', description: 'Check bot latency' },
   { name: 'me', description: 'Credits & Info' },
@@ -62,16 +59,24 @@ const commands = [
   },
   { 
     name: 'embed', 
-    description: 'Create a custom embed using multi-line modal input',
-    options: [{ name: 'channel', description: 'Channel to send embed', type: 7, required: false }],
+    description: 'Create a custom embed using command parameters',
+    options: [
+      { name: 'description', description: 'Main text/body of the embed (use \\n for new lines)', type: 3, required: true },
+      { name: 'title', description: 'Title of the embed', type: 3, required: false },
+      { name: 'channel', description: 'Channel to send embed (Defaults to current)', type: 7, required: false },
+      { name: 'image', description: 'Image URL banner', type: 3, required: false }
+    ],
     default_member_permissions: '8' 
   },
   { 
     name: 'ticket-setup', 
     description: 'Setup the AQW In-Game Help Ticket Panel', 
     options: [
-      { name: 'channel', description: 'Target channel', type: 7, required: true },
-      { name: 'category', description: 'Category for tickets', type: 7, channel_types: [4], required: false }
+      { name: 'channel', description: 'Target channel to post the panel', type: 7, required: true },
+      { name: 'title', description: 'Title for the panel embed', type: 3, required: true },
+      { name: 'description', description: 'Description text (use \\n for new lines)', type: 3, required: true },
+      { name: 'category', description: 'Category channel where open ticket channels will be created', type: 7, channel_types: [4], required: false },
+      { name: 'image', description: 'Banner Image URL', type: 3, required: false }
     ], 
     default_member_permissions: '8' 
   },
@@ -79,34 +84,61 @@ const commands = [
     name: 'verify-setup', 
     description: 'Setup AQW Verification Panel', 
     options: [
-      { name: 'channel', description: 'Where to post button', type: 7, required: true },
-      { name: 'log_channel', description: 'Verification log channel', type: 7, required: true },
-      { name: 'verified_role', description: 'Role assigned upon approval', type: 8, required: true }
+      { name: 'channel', description: 'Channel to post verification panel', type: 7, required: true },
+      { name: 'log_channel', description: 'Channel for verification logs', type: 7, required: true },
+      { name: 'verified_role', description: 'Role assigned upon approval', type: 8, required: true },
+      { name: 'title', description: 'Title of verification panel', type: 3, required: true },
+      { name: 'description', description: 'Description text', type: 3, required: true }
     ], 
     default_member_permissions: '8' 
   },
   { 
     name: 'welcome-setup', 
-    description: 'Configure embed welcome screen', 
-    options: [{ name: 'channel', description: 'Target channel', type: 7, required: true }], 
+    description: 'Configure welcome message', 
+    options: [
+      { name: 'channel', description: 'Channel to send welcome messages', type: 7, required: true },
+      { name: 'title', description: 'Embed Title', type: 3, required: true },
+      { name: 'description', description: 'Text description (Supports {user}, {server}, {count})', type: 3, required: true },
+      { name: 'image', description: 'Banner Image URL', type: 3, required: false }
+    ], 
     default_member_permissions: '8' 
   },
   { 
     name: 'leave-setup', 
-    description: 'Configure embed leave message', 
-    options: [{ name: 'channel', description: 'Target channel', type: 7, required: true }], 
+    description: 'Configure leave message', 
+    options: [
+      { name: 'channel', description: 'Channel to send leave messages', type: 7, required: true },
+      { name: 'title', description: 'Embed Title', type: 3, required: true },
+      { name: 'description', description: 'Text description (Supports {user}, {server})', type: 3, required: true },
+      { name: 'image', description: 'Banner Image URL', type: 3, required: false }
+    ], 
     default_member_permissions: '8' 
   },
   { 
     name: 'boost-setup', 
-    description: 'Configure embed boost message', 
-    options: [{ name: 'channel', description: 'Target channel', type: 7, required: true }], 
+    description: 'Configure boost message', 
+    options: [
+      { name: 'channel', description: 'Channel to send boost messages', type: 7, required: true },
+      { name: 'title', description: 'Embed Title', type: 3, required: true },
+      { name: 'description', description: 'Text description (Supports {user})', type: 3, required: true },
+      { name: 'image', description: 'Banner Image URL', type: 3, required: false }
+    ], 
     default_member_permissions: '8' 
   },
   { 
     name: 'reactionrole', 
     description: 'Create a button reaction-role panel', 
-    options: [{ name: 'channel', description: 'Channel', type: 7, required: true }], 
+    options: [
+      { name: 'channel', description: 'Channel to post panel', type: 7, required: true },
+      { name: 'title', description: 'Panel Title', type: 3, required: true },
+      { name: 'description', description: 'Panel Description', type: 3, required: true },
+      { name: 'role1', description: 'First Role', type: 8, required: true },
+      { name: 'label1', description: 'Button Label for Role 1', type: 3, required: true },
+      { name: 'emoji1', description: 'Emoji for Role 1 Button', type: 3, required: false },
+      { name: 'role2', description: 'Second Role', type: 8, required: false },
+      { name: 'label2', description: 'Button Label for Role 2', type: 3, required: false },
+      { name: 'emoji2', description: 'Emoji for Role 2 Button', type: 3, required: false }
+    ], 
     default_member_permissions: '8' 
   },
   { 
@@ -182,8 +214,8 @@ client.on('guildMemberAdd', async (member) => {
 
   const embed = new EmbedBuilder()
     .setTitle(title)
-    .setDescription(desc)
-    .setColor(cfg.welcomeColor || '#f1c40f')
+    .setDescription(desc.replace(/\\n/g, '\n'))
+    .setColor('#f1c40f')
     .setFooter({ text: `Member #${member.guild.memberCount}` })
     .setTimestamp();
 
@@ -206,7 +238,7 @@ client.on('guildMemberRemove', async (member) => {
 
   const embed = new EmbedBuilder()
     .setTitle(title)
-    .setDescription(desc)
+    .setDescription(desc.replace(/\\n/g, '\n'))
     .setColor('#e74c3c')
     .setTimestamp();
 
@@ -302,124 +334,13 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // Ticket Category Selection Buttons
+    // Category Ticket Creation Buttons
     if (interaction.customId.startsWith('tselect_')) {
       const categoryName = interaction.customId.replace('tselect_', '').replace(/_/g, ' ');
-      
-      const modal = new ModalBuilder()
-        .setCustomId(`modal_openticket_${categoryName}`)
-        .setTitle(`Ticket: ${categoryName.toUpperCase()}`);
-
-      const descInput = new TextInputBuilder()
-        .setCustomId('ticket_user_desc')
-        .setLabel('Describe what you need help with')
-        .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('Enter in-game name, server, room number, or details...')
-        .setRequired(true);
-
-      modal.addComponents(new ActionRowBuilder().addComponents(descInput));
-      return await interaction.showModal(modal);
-    }
-
-    // Close Ticket Button
-    if (interaction.customId === 'close_ticket') {
-      await interaction.reply('🔒 Closing ticket in 3 seconds...');
-      setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
-      return;
-    }
-
-    // Verification Submit Trigger
-    if (interaction.customId === 'start_verification') {
-      const modal = new ModalBuilder().setCustomId('aqw_verify_modal').setTitle('AQW Verification');
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('aqw_name').setLabel('AQW Username').setStyle(TextInputStyle.Short).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('aqw_guild').setLabel('Guild Name').setStyle(TextInputStyle.Short).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('aqw_inviter').setLabel('Who invited you?').setStyle(TextInputStyle.Short).setRequired(false))
-      );
-      return await interaction.showModal(modal);
-    }
-
-    // Verification Approve/Reject
-    if (interaction.customId.startsWith('v_approve_')) {
-      const [, , userId, ign] = interaction.customId.split('_');
-      const cfg = guildSettings.get(interaction.guild.id) || {};
-      const targetMember = await interaction.guild.members.fetch(userId).catch(() => null);
-
-      if (targetMember) {
-        if (cfg.verifyRoleId) await targetMember.roles.add(cfg.verifyRoleId).catch(() => {});
-        await targetMember.setNickname(ign).catch(() => {});
-        const oldEmbed = interaction.message.embeds[0];
-        const updated = EmbedBuilder.from(oldEmbed).setColor('#2ecc71').setFooter({ text: `Approved by ${interaction.user.tag}` });
-        await interaction.update({ embeds: [updated], components: [] });
-      }
-      return;
-    }
-
-    if (interaction.customId.startsWith('v_reject_')) {
-      const oldEmbed = interaction.message.embeds[0];
-      const updated = EmbedBuilder.from(oldEmbed).setColor('#e74c3c').setFooter({ text: `Rejected by ${interaction.user.tag}` });
-      await interaction.update({ embeds: [updated], components: [] });
-      return;
-    }
-  }
-
-  // B. MODAL SUBMISSIONS
-  if (interaction.isModalSubmit()) {
-    // Ticket Panel Setup Modal Handler (Named Category Buttons with Custom Colors/Emojis)
-    if (interaction.customId.startsWith('ts_modal_')) {
       await interaction.deferReply({ ephemeral: true });
-      const [, , channelId, categoryId] = interaction.customId.split('_');
-      const title = interaction.fields.getTextInputValue('panel_title');
-      const desc = interaction.fields.getTextInputValue('panel_desc');
-      const image = interaction.fields.getTextInputValue('panel_image');
 
-      const targetChannel = interaction.guild.channels.cache.get(channelId);
-      if (categoryId !== 'none') {
-        const cfg = guildSettings.get(interaction.guild.id) || {};
-        cfg.ticketCategory = categoryId;
-        guildSettings.set(interaction.guild.id, cfg);
-      }
-
-      const embed = new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(desc)
-        .setColor('#2b2d31')
-        .setFooter({ text: 'You can only have 1 open ticket at a time.' });
-
-      if (image && image.startsWith('http')) embed.setImage(image);
-
-      // Category buttons formatted as named buttons matching the panel
-      const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('tselect_ultra_weeklies').setLabel('Ultra Weeklies').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
-        new ButtonBuilder().setCustomId('tselect_ultra_dailies').setLabel('Ultra Dailies').setStyle(ButtonStyle.Danger).setEmoji('🗡️')
-      );
-
-      const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('tselect_void_auras').setLabel('Void Auras').setStyle(ButtonStyle.Danger).setEmoji('💀'),
-        new ButtonBuilder().setCustomId('tselect_templeshrine').setLabel('Temple Shrine').setStyle(ButtonStyle.Primary).setEmoji('⛩️')
-      );
-
-      const row3 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('tselect_7man_bosses').setLabel('7-Man Bosses').setStyle(ButtonStyle.Primary).setEmoji('👥'),
-        new ButtonBuilder().setCustomId('tselect_general_help').setLabel('General Help').setStyle(ButtonStyle.Primary).setEmoji('🆘')
-      );
-
-      const row4 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('tselect_training').setLabel('Training').setStyle(ButtonStyle.Success).setEmoji('🎓')
-      );
-
-      await targetChannel.send({ embeds: [embed], components: [row1, row2, row3, row4] });
-      return interaction.editReply('✅ Ticket panel successfully posted!');
-    }
-
-    // User Ticket Open Modal Handler
-    if (interaction.customId.startsWith('modal_openticket_')) {
-      await interaction.deferReply({ ephemeral: true });
-      const category = interaction.customId.replace('modal_openticket_', '');
-      const userDesc = interaction.fields.getTextInputValue('ticket_user_desc');
       const cfg = guildSettings.get(interaction.guild.id) || {};
-
-      const chName = `ticket-${category}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
+      const chName = `ticket-${categoryName}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
 
       const ticketChannel = await interaction.guild.channels.create({
         name: chName,
@@ -432,8 +353,8 @@ client.on('interactionCreate', async (interaction) => {
       });
 
       const embed = new EmbedBuilder()
-        .setTitle(`🎫 Help Ticket: ${category.toUpperCase()}`)
-        .setDescription(`**Requested By:** ${interaction.user}\n\n**Details:**\n${userDesc}`)
+        .setTitle(`🎫 Help Ticket: ${categoryName.toUpperCase()}`)
+        .setDescription(`**Requested By:** ${interaction.user}\n\nPlease state your IGN, room/server details, or help request below. Staff will be with you shortly.`)
         .setColor('#3498db')
         .setTimestamp();
 
@@ -445,264 +366,179 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.editReply(`Ticket channel created: ${ticketChannel}`);
     }
 
-    // Embed Modal Submission
-    if (interaction.customId.startsWith('embed_modal_')) {
-      await interaction.deferReply({ ephemeral: true });
-      const channelId = interaction.customId.split('_')[2];
-      const targetChannel = interaction.guild.channels.cache.get(channelId) || interaction.channel;
-
-      const title = interaction.fields.getTextInputValue('embed_title');
-      const desc = interaction.fields.getTextInputValue('embed_desc');
-      const image = interaction.fields.getTextInputValue('embed_image');
-
-      const embed = new EmbedBuilder().setDescription(desc).setColor('#3498db');
-      if (title) embed.setTitle(title);
-      if (image && image.startsWith('http')) embed.setImage(image);
-
-      await targetChannel.send({ embeds: [embed] });
-      return interaction.editReply('✅ Embed posted!');
-    }
-
-    // Welcome Setup Modal Submission
-    if (interaction.customId.startsWith('welcome_modal_')) {
-      await interaction.deferReply({ ephemeral: true });
-      const channelId = interaction.customId.split('_')[2];
-      const cfg = guildSettings.get(interaction.guild.id) || {};
-
-      cfg.welcomeChannelId = channelId;
-      cfg.welcomeTitle = interaction.fields.getTextInputValue('welcome_title');
-      cfg.welcomeDesc = interaction.fields.getTextInputValue('welcome_desc');
-      cfg.welcomeImage = interaction.fields.getTextInputValue('welcome_image');
-
-      guildSettings.set(interaction.guild.id, cfg);
-      return interaction.editReply('✅ Welcome Embed configured successfully!');
-    }
-
-    // Leave Setup Modal Submission
-    if (interaction.customId.startsWith('leave_modal_')) {
-      await interaction.deferReply({ ephemeral: true });
-      const channelId = interaction.customId.split('_')[2];
-      const cfg = guildSettings.get(interaction.guild.id) || {};
-
-      cfg.leaveChannelId = channelId;
-      cfg.leaveTitle = interaction.fields.getTextInputValue('leave_title');
-      cfg.leaveDesc = interaction.fields.getTextInputValue('leave_desc');
-      cfg.leaveImage = interaction.fields.getTextInputValue('leave_image');
-
-      guildSettings.set(interaction.guild.id, cfg);
-      return interaction.editReply('✅ Leave Embed configured successfully!');
-    }
-
-    // Boost Setup Modal Submission
-    if (interaction.customId.startsWith('boost_modal_')) {
-      await interaction.deferReply({ ephemeral: true });
-      const channelId = interaction.customId.split('_')[2];
-      const cfg = guildSettings.get(interaction.guild.id) || {};
-
-      cfg.boostChannelId = channelId;
-      cfg.boostTitle = interaction.fields.getTextInputValue('boost_title');
-      cfg.boostDesc = interaction.fields.getTextInputValue('boost_desc');
-      cfg.boostImage = interaction.fields.getTextInputValue('boost_image');
-
-      guildSettings.set(interaction.guild.id, cfg);
-      return interaction.editReply('✅ Boost Embed configured successfully!');
-    }
-
-    // Verification Modal Setup
-    if (interaction.customId.startsWith('verify_modal_')) {
-      await interaction.deferReply({ ephemeral: true });
-      const [, , chId, logId, roleId] = interaction.customId.split('_');
-
-      const cfg = guildSettings.get(interaction.guild.id) || {};
-      cfg.verifyLogChannelId = logId;
-      cfg.verifyRoleId = roleId;
-      guildSettings.set(interaction.guild.id, cfg);
-
-      const embed = new EmbedBuilder()
-        .setTitle(interaction.fields.getTextInputValue('verify_title'))
-        .setDescription(interaction.fields.getTextInputValue('verify_desc'))
-        .setColor('#2ecc71');
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('start_verification').setLabel('Verify Account').setStyle(ButtonStyle.Success).setEmoji('✅')
-      );
-
-      const target = interaction.guild.channels.cache.get(chId);
-      await target.send({ embeds: [embed], components: [row] });
-      return interaction.editReply('✅ Verification panel posted!');
-    }
-
-    // Reaction Role Modal Handler (Editable up to 5 buttons with Custom Emojis)
-    if (interaction.customId.startsWith('rr_modal_')) {
-      await interaction.deferReply({ ephemeral: true });
-      const channelId = interaction.customId.split('_')[2];
-      const targetChannel = interaction.guild.channels.cache.get(channelId);
-
-      const title = interaction.fields.getTextInputValue('rr_title');
-      const desc = interaction.fields.getTextInputValue('rr_desc');
-      const rolesInput = interaction.fields.getTextInputValue('rr_roles').split('\n');
-
-      const embed = new EmbedBuilder().setTitle(title).setDescription(desc).setColor('#3498db');
-      const row = new ActionRowBuilder();
-
-      let count = 0;
-      for (const line of rolesInput) {
-        if (count >= 5) break;
-        const [roleId, label, emoji] = line.split('|').map(s => s?.trim());
-        if (roleId && label) {
-          const btn = new ButtonBuilder().setCustomId(`rr_${roleId}`).setLabel(label).setStyle(ButtonStyle.Primary);
-          if (emoji) btn.setEmoji(emoji);
-          row.addComponents(btn);
-          count++;
-        }
-      }
-
-      await targetChannel.send({ embeds: [embed], components: [row] });
-      return interaction.editReply('✅ Reaction Role panel posted!');
+    // Close Ticket Button
+    if (interaction.customId === 'close_ticket') {
+      await interaction.reply('🔒 Closing ticket in 3 seconds...');
+      setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
+      return;
     }
   }
 
-  // C. SLASH COMMAND HANDLERS
+  // B. SLASH COMMAND HANDLERS
   if (!interaction.isChatInputCommand()) return;
   const { commandName, options } = interaction;
 
-  // /ticket-setup
+  // /ticket-setup (No Modal)
   if (commandName === 'ticket-setup') {
+    await interaction.deferReply({ ephemeral: true });
     const channel = options.getChannel('channel');
+    const title = options.getString('title');
+    const desc = options.getString('description').replace(/\\n/g, '\n');
     const category = options.getChannel('category');
+    const image = options.getString('image');
 
-    const modal = new ModalBuilder()
-      .setCustomId(`ts_modal_${channel.id}_${category ? category.id : 'none'}`)
-      .setTitle('Ticket Panel Setup');
+    if (category) {
+      const cfg = guildSettings.get(interaction.guild.id) || {};
+      cfg.ticketCategory = category.id;
+      guildSettings.set(interaction.guild.id, cfg);
+    }
 
-    const titleInput = new TextInputBuilder()
-      .setCustomId('panel_title')
-      .setLabel('Title')
-      .setStyle(TextInputStyle.Short)
-      .setValue('💖 In-Game Help Tickets 💖')
-      .setRequired(true);
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(desc)
+      .setColor('#2b2d31')
+      .setFooter({ text: 'You can only have 1 open ticket at a time.' });
 
-    const descInput = new TextInputBuilder()
-      .setCustomId('panel_desc')
-      .setLabel('Description (Shift + Enter supported!)')
-      .setStyle(TextInputStyle.Paragraph)
-      .setRequired(true);
+    if (image && image.startsWith('http')) embed.setImage(image);
 
-    const imageInput = new TextInputBuilder()
-      .setCustomId('panel_image')
-      .setLabel('Image Banner URL (Optional)')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(false);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(titleInput),
-      new ActionRowBuilder().addComponents(descInput),
-      new ActionRowBuilder().addComponents(imageInput)
+    const row1 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('tselect_ultra_weeklies').setLabel('Ultra Weeklies').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
+      new ButtonBuilder().setCustomId('tselect_ultra_dailies').setLabel('Ultra Dailies').setStyle(ButtonStyle.Danger).setEmoji('🗡️')
     );
 
-    return await interaction.showModal(modal);
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('tselect_void_auras').setLabel('Void Auras').setStyle(ButtonStyle.Danger).setEmoji('💀'),
+      new ButtonBuilder().setCustomId('tselect_templeshrine').setLabel('Temple Shrine').setStyle(ButtonStyle.Primary).setEmoji('⛩️')
+    );
+
+    const row3 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('tselect_7man_bosses').setLabel('7-Man Bosses').setStyle(ButtonStyle.Primary).setEmoji('👥'),
+      new ButtonBuilder().setCustomId('tselect_general_help').setLabel('General Help').setStyle(ButtonStyle.Primary).setEmoji('🆘')
+    );
+
+    const row4 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('tselect_training').setLabel('Training').setStyle(ButtonStyle.Success).setEmoji('🎓')
+    );
+
+    await channel.send({ embeds: [embed], components: [row1, row2, row3, row4] });
+    return interaction.editReply('✅ Ticket panel successfully posted!');
   }
 
-  // /welcome-setup
-  if (commandName === 'welcome-setup') {
-    const channel = options.getChannel('channel');
-
-    const modal = new ModalBuilder()
-      .setCustomId(`welcome_modal_${channel.id}`)
-      .setTitle('Welcome Embed Setup');
-
-    const titleInput = new TextInputBuilder().setCustomId('welcome_title').setLabel('Welcome Title').setStyle(TextInputStyle.Short).setValue('Welcome to AQW Community Server!').setRequired(true);
-    const descInput = new TextInputBuilder().setCustomId('welcome_desc').setLabel('Description (Shift + Enter supported!)').setStyle(TextInputStyle.Paragraph).setValue('Hey there, {user}! We\'re glad to have you here.\n\n🔒 **Get Verified to Unlock the Server!**').setRequired(true);
-    const imageInput = new TextInputBuilder().setCustomId('welcome_image').setLabel('Banner Image URL').setStyle(TextInputStyle.Short).setRequired(false);
-
-    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput), new ActionRowBuilder().addComponents(imageInput));
-    return await interaction.showModal(modal);
-  }
-
-  // /leave-setup
-  if (commandName === 'leave-setup') {
-    const channel = options.getChannel('channel');
-
-    const modal = new ModalBuilder()
-      .setCustomId(`leave_modal_${channel.id}`)
-      .setTitle('Leave Embed Setup');
-
-    const titleInput = new TextInputBuilder().setCustomId('leave_title').setLabel('Leave Title').setStyle(TextInputStyle.Short).setValue('Goodbye!').setRequired(true);
-    const descInput = new TextInputBuilder().setCustomId('leave_desc').setLabel('Description (Shift + Enter supported!)').setStyle(TextInputStyle.Paragraph).setValue('**{user}** has left the server.').setRequired(true);
-    const imageInput = new TextInputBuilder().setCustomId('leave_image').setLabel('Banner Image URL (Optional)').setStyle(TextInputStyle.Short).setRequired(false);
-
-    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput), new ActionRowBuilder().addComponents(imageInput));
-    return await interaction.showModal(modal);
-  }
-
-  // /boost-setup
-  if (commandName === 'boost-setup') {
-    const channel = options.getChannel('channel');
-
-    const modal = new ModalBuilder()
-      .setCustomId(`boost_modal_${channel.id}`)
-      .setTitle('Boost Embed Setup');
-
-    const titleInput = new TextInputBuilder().setCustomId('boost_title').setLabel('Boost Title').setStyle(TextInputStyle.Short).setValue('Server Boosted! 🚀').setRequired(true);
-    const descInput = new TextInputBuilder().setCustomId('boost_desc').setLabel('Description (Shift + Enter supported!)').setStyle(TextInputStyle.Paragraph).setValue('Thank you **{user}** for boosting the server!').setRequired(true);
-    const imageInput = new TextInputBuilder().setCustomId('boost_image').setLabel('Banner Image URL (Optional)').setStyle(TextInputStyle.Short).setRequired(false);
-
-    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput), new ActionRowBuilder().addComponents(imageInput));
-    return await interaction.showModal(modal);
-  }
-
-  // /embed
+  // /embed (No Modal)
   if (commandName === 'embed') {
+    await interaction.deferReply({ ephemeral: true });
     const targetChannel = options.getChannel('channel') || interaction.channel;
+    const title = options.getString('title');
+    const desc = options.getString('description').replace(/\\n/g, '\n');
+    const image = options.getString('image');
 
-    const modal = new ModalBuilder()
-      .setCustomId(`embed_modal_${targetChannel.id}`)
-      .setTitle('Create Custom Embed');
+    const embed = new EmbedBuilder().setDescription(desc).setColor('#3498db');
+    if (title) embed.setTitle(title);
+    if (image && image.startsWith('http')) embed.setImage(image);
 
-    const titleInput = new TextInputBuilder().setCustomId('embed_title').setLabel('Title (Optional)').setStyle(TextInputStyle.Short).setRequired(false);
-    const descInput = new TextInputBuilder().setCustomId('embed_desc').setLabel('Description (Shift + Enter Supported)').setStyle(TextInputStyle.Paragraph).setRequired(true);
-    const imageInput = new TextInputBuilder().setCustomId('embed_image').setLabel('Image URL (Optional)').setStyle(TextInputStyle.Short).setRequired(false);
-
-    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput), new ActionRowBuilder().addComponents(imageInput));
-    return await interaction.showModal(modal);
+    await targetChannel.send({ embeds: [embed] });
+    return interaction.editReply('✅ Embed posted!');
   }
 
-  // /reactionrole (Supports format: RoleID | Button Label | Emoji)
-  if (commandName === 'reactionrole') {
+  // /welcome-setup (No Modal)
+  if (commandName === 'welcome-setup') {
+    await interaction.deferReply({ ephemeral: true });
     const channel = options.getChannel('channel');
+    const cfg = guildSettings.get(interaction.guild.id) || {};
 
-    const modal = new ModalBuilder()
-      .setCustomId(`rr_modal_${channel.id}`)
-      .setTitle('Reaction Role Setup');
+    cfg.welcomeChannelId = channel.id;
+    cfg.welcomeTitle = options.getString('title');
+    cfg.welcomeDesc = options.getString('description');
+    cfg.welcomeImage = options.getString('image');
 
-    const titleInput = new TextInputBuilder().setCustomId('rr_title').setLabel('Panel Title').setStyle(TextInputStyle.Short).setRequired(true);
-    const descInput = new TextInputBuilder().setCustomId('rr_desc').setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(true);
-    const rolesInput = new TextInputBuilder()
-      .setCustomId('rr_roles')
-      .setLabel('Roles (Format: RoleID | Label | Emoji)')
-      .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder('1234567890 | Member | 👤\n0987654321 | VIP | ⭐')
-      .setRequired(true);
-
-    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput), new ActionRowBuilder().addComponents(rolesInput));
-    return await interaction.showModal(modal);
+    guildSettings.set(interaction.guild.id, cfg);
+    return interaction.editReply('✅ Welcome Embed configured successfully!');
   }
 
-  // /verify-setup
+  // /leave-setup (No Modal)
+  if (commandName === 'leave-setup') {
+    await interaction.deferReply({ ephemeral: true });
+    const channel = options.getChannel('channel');
+    const cfg = guildSettings.get(interaction.guild.id) || {};
+
+    cfg.leaveChannelId = channel.id;
+    cfg.leaveTitle = options.getString('title');
+    cfg.leaveDesc = options.getString('description');
+    cfg.leaveImage = options.getString('image');
+
+    guildSettings.set(interaction.guild.id, cfg);
+    return interaction.editReply('✅ Leave Embed configured successfully!');
+  }
+
+  // /boost-setup (No Modal)
+  if (commandName === 'boost-setup') {
+    await interaction.deferReply({ ephemeral: true });
+    const channel = options.getChannel('channel');
+    const cfg = guildSettings.get(interaction.guild.id) || {};
+
+    cfg.boostChannelId = channel.id;
+    cfg.boostTitle = options.getString('title');
+    cfg.boostDesc = options.getString('description');
+    cfg.boostImage = options.getString('image');
+
+    guildSettings.set(interaction.guild.id, cfg);
+    return interaction.editReply('✅ Boost Embed configured successfully!');
+  }
+
+  // /verify-setup (No Modal)
   if (commandName === 'verify-setup') {
+    await interaction.deferReply({ ephemeral: true });
     const channel = options.getChannel('channel');
     const logChannel = options.getChannel('log_channel');
     const role = options.getRole('verified_role');
+    const title = options.getString('title');
+    const desc = options.getString('description').replace(/\\n/g, '\n');
 
-    const modal = new ModalBuilder()
-      .setCustomId(`verify_modal_${channel.id}_${logChannel.id}_${role.id}`)
-      .setTitle('Verification Setup');
+    const cfg = guildSettings.get(interaction.guild.id) || {};
+    cfg.verifyLogChannelId = logChannel.id;
+    cfg.verifyRoleId = role.id;
+    guildSettings.set(interaction.guild.id, cfg);
 
-    const titleInput = new TextInputBuilder().setCustomId('verify_title').setLabel('Title').setStyle(TextInputStyle.Short).setValue('AQW Verification').setRequired(true);
-    const descInput = new TextInputBuilder().setCustomId('verify_desc').setLabel('Description (Shift + Enter)').setStyle(TextInputStyle.Paragraph).setValue('Click below to verify your account.').setRequired(true);
+    const embed = new EmbedBuilder().setTitle(title).setDescription(desc).setColor('#2ecc71');
 
-    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput));
-    return await interaction.showModal(modal);
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('start_verification').setLabel('Verify Account').setStyle(ButtonStyle.Success).setEmoji('✅')
+    );
+
+    await channel.send({ embeds: [embed], components: [row] });
+    return interaction.editReply('✅ Verification panel posted!');
+  }
+
+  // /reactionrole (No Modal)
+  if (commandName === 'reactionrole') {
+    await interaction.deferReply({ ephemeral: true });
+    const channel = options.getChannel('channel');
+    const title = options.getString('title');
+    const desc = options.getString('description').replace(/\\n/g, '\n');
+
+    const embed = new EmbedBuilder().setTitle(title).setDescription(desc).setColor('#3498db');
+    const row = new ActionRowBuilder();
+
+    const role1 = options.getRole('role1');
+    const label1 = options.getString('label1');
+    const emoji1 = options.getString('emoji1');
+
+    const btn1 = new ButtonBuilder().setCustomId(`rr_${role1.id}`).setLabel(label1).setStyle(ButtonStyle.Primary);
+    if (emoji1) btn1.setEmoji(emoji1);
+    row.addComponents(btn1);
+
+    const role2 = options.getRole('role2');
+    const label2 = options.getString('label2');
+    const emoji2 = options.getString('emoji2');
+
+    if (role2 && label2) {
+      const btn2 = new ButtonBuilder().setCustomId(`rr_${role2.id}`).setLabel(label2).setStyle(ButtonStyle.Primary);
+      if (emoji2) btn2.setEmoji(emoji2);
+      row.addComponents(btn2);
+    }
+
+    await channel.send({ embeds: [embed], components: [row] });
+    return interaction.editReply('✅ Reaction Role panel posted!');
   }
 
   // Helper Points Management (`/points`)
@@ -756,7 +592,7 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.editReply({ embeds: [embed] });
   }
 
-  // Moderation Slash Commands (Embed Formatted)
+  // Moderation Commands
   if (commandName === 'kick') {
     await interaction.deferReply({ ephemeral: true });
     const member = options.getMember('user');
