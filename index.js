@@ -84,14 +84,8 @@ const commands = [
   { name: 'me', description: 'Credits & Info' },
   {
     name: 'embed',
-    description: 'Create a custom embedded message',
+    description: 'Create a custom embedded message with Shift+Enter support',
     options: [
-      { name: 'title', description: 'Title of the embed', type: 3, required: false },
-      { name: 'description', description: 'Main text', type: 3, required: false },
-      { name: 'color', description: 'Hex Color (e.g. #FF0000)', type: 3, required: false },
-      { name: 'image', description: 'Image URL', type: 3, required: false },
-      { name: 'thumbnail', description: 'Thumbnail URL', type: 3, required: false },
-      { name: 'footer', description: 'Footer text', type: 3, required: false },
       { name: 'channel', description: 'Where to send it?', type: 7, required: false }
     ],
     default_member_permissions: '8'
@@ -610,7 +604,34 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
-    // D. USER TICKET CREATION MODAL
+    // D. GENERAL EMBED MODAL
+    if (interaction.customId.startsWith('embed_modal_')) {
+        await interaction.deferReply({ ephemeral: true });
+        const channelId = interaction.customId.split('_')[2];
+        const channel = interaction.guild.channels.cache.get(channelId) || interaction.channel;
+
+        const title = interaction.fields.getTextInputValue('embed_title');
+        const desc = interaction.fields.getTextInputValue('embed_desc');
+        const color = interaction.fields.getTextInputValue('embed_color') || '#0099FF';
+        const image = interaction.fields.getTextInputValue('embed_image');
+        const footer = interaction.fields.getTextInputValue('embed_footer');
+
+        const embed = new EmbedBuilder().setColor(color.startsWith('#') ? color : `#${color}`);
+        if (title) embed.setTitle(title);
+        if (desc) embed.setDescription(desc);
+        if (image) embed.setImage(image);
+        if (footer) embed.setFooter({ text: footer });
+
+        if (channel) {
+            await channel.send({ embeds: [embed] });
+            interaction.editReply('Custom embed successfully posted!');
+        } else {
+            interaction.editReply('❌ Target channel not found.');
+        }
+        return;
+    }
+
+    // E. USER TICKET CREATION MODAL
     if (interaction.customId.startsWith('modal_')) {
         await interaction.deferReply({ ephemeral: true });
         const type = interaction.customId.replace('modal_', '');
@@ -753,6 +774,54 @@ client.on('interactionCreate', async interaction => {
         return await interaction.showModal(modal);
     }
 
+    if (commandName === 'embed') {
+        const targetChannel = options.getChannel('channel') || interaction.channel;
+
+        const modal = new ModalBuilder()
+            .setCustomId(`embed_modal_${targetChannel.id}`)
+            .setTitle('Create Custom Embed');
+
+        const titleInput = new TextInputBuilder()
+            .setCustomId('embed_title')
+            .setLabel('Title (Optional)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false);
+
+        const descInput = new TextInputBuilder()
+            .setCustomId('embed_desc')
+            .setLabel('Description (Shift + Enter Supported)')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true);
+
+        const colorInput = new TextInputBuilder()
+            .setCustomId('embed_color')
+            .setLabel('Hex Color (Optional e.g. #0099FF)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false);
+
+        const imageInput = new TextInputBuilder()
+            .setCustomId('embed_image')
+            .setLabel('Image URL (Optional)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false);
+
+        const footerInput = new TextInputBuilder()
+            .setCustomId('embed_footer')
+            .setLabel('Footer Text (Optional)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false);
+
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(titleInput),
+            new ActionRowBuilder().addComponents(descInput),
+            new ActionRowBuilder().addComponents(colorInput),
+            new ActionRowBuilder().addComponents(imageInput),
+            new ActionRowBuilder().addComponents(footerInput)
+        );
+
+        return await interaction.showModal(modal);
+    }
+
     if (commandName === 'purge') {
         await interaction.deferReply({ ephemeral: true }); 
         const amt = options.getInteger('amount');
@@ -779,25 +848,6 @@ client.on('interactionCreate', async interaction => {
         cfg.prefix = newPrefix;
         guildSettings.set(interaction.guildId, cfg);
         interaction.editReply(`Prefix changed to: \`${newPrefix}\``);
-    }
-    else if (commandName === 'embed') {
-        const title = options.getString('title');
-        const description = options.getString('description');
-        const color = options.getString('color') || '#0099FF';
-        const image = options.getString('image');
-        const thumbnail = options.getString('thumbnail');
-        const footer = options.getString('footer');
-        const targetChannel = options.getChannel('channel') || interaction.channel;
-
-        const embed = new EmbedBuilder().setColor(color);
-        if (title) embed.setTitle(title);
-        if (description) embed.setDescription(description.replace(/\\n/g, '\n'));
-        if (image) embed.setImage(image);
-        if (thumbnail) embed.setThumbnail(thumbnail);
-        if (footer) embed.setFooter({ text: footer });
-
-        await targetChannel.send({ embeds: [embed] });
-        interaction.editReply({ content: 'Embed sent!', ephemeral: true });
     }
     else if (commandName === 'ban') {
         const user = options.getMember('user');
