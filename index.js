@@ -47,7 +47,27 @@ function uwuify(text) {
   return text.replace(/(?:r|l)/g, 'w').replace(/(?:R|L)/g, 'W').replace(/n([aeiou])/g, 'ny$1').replace(/N([aeiou])/g, 'Ny$1').replace(/N([AEIOU])/g, 'Ny$1').replace(/ove/g, 'uv').replace(/!+/g, ' ' + faces[Math.floor(Math.random() * faces.length)] + ' ');
 }
 
-// --- SLASH COMMAND DEFINITIONS (USING PARAMETERS/OPTIONS) ---
+// Helper to map color string to Discord ButtonStyle
+function parseButtonStyle(styleString) {
+  switch ((styleString || '').toLowerCase()) {
+    case 'green':
+    case 'success':
+      return ButtonStyle.Success;
+    case 'red':
+    case 'danger':
+      return ButtonStyle.Danger;
+    case 'grey':
+    case 'gray':
+    case 'secondary':
+      return ButtonStyle.Secondary;
+    case 'blue':
+    case 'primary':
+    default:
+      return ButtonStyle.Primary;
+  }
+}
+
+// --- SLASH COMMAND DEFINITIONS ---
 const commands = [
   { name: 'ping', description: 'Check bot latency' },
   { name: 'me', description: 'Credits & Info' },
@@ -70,12 +90,54 @@ const commands = [
   },
   { 
     name: 'ticket-setup', 
-    description: 'Setup the AQW In-Game Help Ticket Panel', 
+    description: 'Setup an Editable AQW In-Game Help Ticket Panel', 
     options: [
       { name: 'channel', description: 'Target channel to post the panel', type: 7, required: true },
       { name: 'title', description: 'Title for the panel embed', type: 3, required: true },
       { name: 'description', description: 'Description text (use \\n for new lines)', type: 3, required: true },
-      { name: 'category', description: 'Category channel where open ticket channels will be created', type: 7, channel_types: [4], required: false },
+      { name: 'btn1_label', description: 'Label for Button 1 (e.g. Ultra Weeklies)', type: 3, required: true },
+      { name: 'btn1_emoji', description: 'Emoji for Button 1 (e.g. ⚔️)', type: 3, required: false },
+      { 
+        name: 'btn1_style', 
+        description: 'Button 1 Color', 
+        type: 3, 
+        required: false,
+        choices: [
+          { name: 'Red (Danger)', value: 'red' },
+          { name: 'Blue (Primary)', value: 'blue' },
+          { name: 'Green (Success)', value: 'green' },
+          { name: 'Grey (Secondary)', value: 'grey' }
+        ]
+      },
+      { name: 'btn2_label', description: 'Label for Button 2 (Optional)', type: 3, required: false },
+      { name: 'btn2_emoji', description: 'Emoji for Button 2', type: 3, required: false },
+      { 
+        name: 'btn2_style', 
+        description: 'Button 2 Color', 
+        type: 3, 
+        required: false,
+        choices: [
+          { name: 'Red (Danger)', value: 'red' },
+          { name: 'Blue (Primary)', value: 'blue' },
+          { name: 'Green (Success)', value: 'green' },
+          { name: 'Grey (Secondary)', value: 'grey' }
+        ]
+      },
+      { name: 'btn3_label', description: 'Label for Button 3 (Optional)', type: 3, required: false },
+      { name: 'btn3_emoji', description: 'Emoji for Button 3', type: 3, required: false },
+      { 
+        name: 'btn3_style', 
+        description: 'Button 3 Color', 
+        type: 3, 
+        required: false,
+        choices: [
+          { name: 'Red (Danger)', value: 'red' },
+          { name: 'Blue (Primary)', value: 'blue' },
+          { name: 'Green (Success)', value: 'green' },
+          { name: 'Grey (Secondary)', value: 'grey' }
+        ]
+      },
+      { name: 'category', description: 'Category channel where open tickets will be created', type: 7, channel_types: [4], required: false },
       { name: 'image', description: 'Banner Image URL', type: 3, required: false }
     ], 
     default_member_permissions: '8' 
@@ -334,7 +396,7 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // Category Ticket Creation Buttons
+    // Dynamic Category Ticket Creation Buttons
     if (interaction.customId.startsWith('tselect_')) {
       const categoryName = interaction.customId.replace('tselect_', '').replace(/_/g, ' ');
       await interaction.deferReply({ ephemeral: true });
@@ -378,7 +440,7 @@ client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   const { commandName, options } = interaction;
 
-  // /ticket-setup (No Modal)
+  // /ticket-setup (Fully Editable Buttons via Command Parameters)
   if (commandName === 'ticket-setup') {
     await interaction.deferReply({ ephemeral: true });
     const channel = options.getChannel('channel');
@@ -401,30 +463,51 @@ client.on('interactionCreate', async (interaction) => {
 
     if (image && image.startsWith('http')) embed.setImage(image);
 
-    const row1 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('tselect_ultra_weeklies').setLabel('Ultra Weeklies').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
-      new ButtonBuilder().setCustomId('tselect_ultra_dailies').setLabel('Ultra Dailies').setStyle(ButtonStyle.Danger).setEmoji('🗡️')
-    );
+    // Build Dynamic Editable Buttons
+    const row = new ActionRowBuilder();
 
-    const row2 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('tselect_void_auras').setLabel('Void Auras').setStyle(ButtonStyle.Danger).setEmoji('💀'),
-      new ButtonBuilder().setCustomId('tselect_templeshrine').setLabel('Temple Shrine').setStyle(ButtonStyle.Primary).setEmoji('⛩️')
-    );
+    // Button 1
+    const b1Label = options.getString('btn1_label');
+    const b1Emoji = options.getString('btn1_emoji');
+    const b1Style = options.getString('btn1_style');
+    const btn1 = new ButtonBuilder()
+      .setCustomId(`tselect_${b1Label.toLowerCase().replace(/\s+/g, '_')}`)
+      .setLabel(b1Label)
+      .setStyle(parseButtonStyle(b1Style));
+    if (b1Emoji) btn1.setEmoji(b1Emoji);
+    row.addComponents(btn1);
 
-    const row3 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('tselect_7man_bosses').setLabel('7-Man Bosses').setStyle(ButtonStyle.Primary).setEmoji('👥'),
-      new ButtonBuilder().setCustomId('tselect_general_help').setLabel('General Help').setStyle(ButtonStyle.Primary).setEmoji('🆘')
-    );
+    // Button 2 (Optional)
+    const b2Label = options.getString('btn2_label');
+    if (b2Label) {
+      const b2Emoji = options.getString('btn2_emoji');
+      const b2Style = options.getString('btn2_style');
+      const btn2 = new ButtonBuilder()
+        .setCustomId(`tselect_${b2Label.toLowerCase().replace(/\s+/g, '_')}`)
+        .setLabel(b2Label)
+        .setStyle(parseButtonStyle(b2Style));
+      if (b2Emoji) btn2.setEmoji(b2Emoji);
+      row.addComponents(btn2);
+    }
 
-    const row4 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('tselect_training').setLabel('Training').setStyle(ButtonStyle.Success).setEmoji('🎓')
-    );
+    // Button 3 (Optional)
+    const b3Label = options.getString('btn3_label');
+    if (b3Label) {
+      const b3Emoji = options.getString('btn3_emoji');
+      const b3Style = options.getString('btn3_style');
+      const btn3 = new ButtonBuilder()
+        .setCustomId(`tselect_${b3Label.toLowerCase().replace(/\s+/g, '_')}`)
+        .setLabel(b3Label)
+        .setStyle(parseButtonStyle(b3Style));
+      if (b3Emoji) btn3.setEmoji(b3Emoji);
+      row.addComponents(btn3);
+    }
 
-    await channel.send({ embeds: [embed], components: [row1, row2, row3, row4] });
-    return interaction.editReply('✅ Ticket panel successfully posted!');
+    await channel.send({ embeds: [embed], components: [row] });
+    return interaction.editReply('✅ Customizable ticket panel successfully posted!');
   }
 
-  // /embed (No Modal)
+  // /embed
   if (commandName === 'embed') {
     await interaction.deferReply({ ephemeral: true });
     const targetChannel = options.getChannel('channel') || interaction.channel;
@@ -440,7 +523,7 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.editReply('✅ Embed posted!');
   }
 
-  // /welcome-setup (No Modal)
+  // /welcome-setup
   if (commandName === 'welcome-setup') {
     await interaction.deferReply({ ephemeral: true });
     const channel = options.getChannel('channel');
@@ -455,7 +538,7 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.editReply('✅ Welcome Embed configured successfully!');
   }
 
-  // /leave-setup (No Modal)
+  // /leave-setup
   if (commandName === 'leave-setup') {
     await interaction.deferReply({ ephemeral: true });
     const channel = options.getChannel('channel');
@@ -470,7 +553,7 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.editReply('✅ Leave Embed configured successfully!');
   }
 
-  // /boost-setup (No Modal)
+  // /boost-setup
   if (commandName === 'boost-setup') {
     await interaction.deferReply({ ephemeral: true });
     const channel = options.getChannel('channel');
@@ -485,7 +568,7 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.editReply('✅ Boost Embed configured successfully!');
   }
 
-  // /verify-setup (No Modal)
+  // /verify-setup
   if (commandName === 'verify-setup') {
     await interaction.deferReply({ ephemeral: true });
     const channel = options.getChannel('channel');
@@ -509,7 +592,7 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.editReply('✅ Verification panel posted!');
   }
 
-  // /reactionrole (No Modal)
+  // /reactionrole
   if (commandName === 'reactionrole') {
     await interaction.deferReply({ ephemeral: true });
     const channel = options.getChannel('channel');
