@@ -160,7 +160,7 @@ client.once(Events.ClientReady, async () => {
   const rest = new REST().setToken(client.token);
   try {
     console.log('Refreshing application (/) commands...');
-    await rest.put(Routes.applicationCommands(client.user.id), { body: [] }); // Clear global
+    await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
     await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
     console.log('Commands successfully registered to Guild!');
   } catch (error) {
@@ -177,17 +177,17 @@ client.on('guildMemberAdd', async (member) => {
   if (!channel) return;
 
   const title = cfg.welcomeTitle || `Welcome to ${member.guild.name}!`;
-  let desc = cfg.welcomeDesc || `Hey there, ${member}! We're glad to have you here.`;
-  desc = desc.replace('{user}', `${member}`).replace('{server}', member.guild.name).replace('{count}', member.guild.memberCount);
+  let desc = cfg.welcomeDesc || `Hey there, {user}! We're glad to have you here.`;
+  desc = desc.replace(/{user}/g, `${member}`).replace(/{server}/g, member.guild.name).replace(/{count}/g, member.guild.memberCount);
 
   const embed = new EmbedBuilder()
     .setTitle(title)
     .setDescription(desc)
-    .setColor('#f1c40f')
+    .setColor(cfg.welcomeColor || '#f1c40f')
     .setFooter({ text: `Member #${member.guild.memberCount}` })
     .setTimestamp();
 
-  if (cfg.welcomeImage) embed.setImage(cfg.welcomeImage);
+  if (cfg.welcomeImage && cfg.welcomeImage.startsWith('http')) embed.setImage(cfg.welcomeImage);
 
   await channel.send({ embeds: [embed] });
 });
@@ -200,11 +200,17 @@ client.on('guildMemberRemove', async (member) => {
   const channel = member.guild.channels.cache.get(cfg.leaveChannelId);
   if (!channel) return;
 
+  const title = cfg.leaveTitle || 'Member Left';
+  let desc = cfg.leaveDesc || `**{user}** has left the server.`;
+  desc = desc.replace(/{user}/g, `${member.user.tag}`).replace(/{server}/g, member.guild.name);
+
   const embed = new EmbedBuilder()
-    .setTitle('Member Left')
-    .setDescription(`**${member.user.tag}** has left the server.`)
+    .setTitle(title)
+    .setDescription(desc)
     .setColor('#e74c3c')
     .setTimestamp();
+
+  if (cfg.leaveImage && cfg.leaveImage.startsWith('http')) embed.setImage(cfg.leaveImage);
 
   await channel.send({ embeds: [embed] });
 });
@@ -296,9 +302,9 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // Ticket Selection Buttons (Matching 2nd Photo)
+    // Ticket Category Selection Buttons
     if (interaction.customId.startsWith('tselect_')) {
-      const categoryName = interaction.customId.replace('tselect_', '');
+      const categoryName = interaction.customId.replace('tselect_', '').replace(/_/g, ' ');
       
       const modal = new ModalBuilder()
         .setCustomId(`modal_openticket_${categoryName}`)
@@ -308,7 +314,7 @@ client.on('interactionCreate', async (interaction) => {
         .setCustomId('ticket_user_desc')
         .setLabel('Describe what you need help with')
         .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('Enter in-game name, server, room number, or problem details...')
+        .setPlaceholder('Enter in-game name, server, room number, or details...')
         .setRequired(true);
 
       modal.addComponents(new ActionRowBuilder().addComponents(descInput));
@@ -359,7 +365,7 @@ client.on('interactionCreate', async (interaction) => {
 
   // B. MODAL SUBMISSIONS
   if (interaction.isModalSubmit()) {
-    // Ticket Panel Post Modal Handler
+    // Ticket Panel Setup Modal Handler (Named Category Buttons with Custom Colors/Emojis)
     if (interaction.customId.startsWith('ts_modal_')) {
       await interaction.deferReply({ ephemeral: true });
       const [, , channelId, categoryId] = interaction.customId.split('_');
@@ -382,31 +388,31 @@ client.on('interactionCreate', async (interaction) => {
 
       if (image && image.startsWith('http')) embed.setImage(image);
 
-      // Category buttons matching image
+      // Category buttons formatted as named buttons matching the panel
       const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('tselect_ultra_weeklies').setLabel('Select').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
-        new ButtonBuilder().setCustomId('tselect_ultra_dailies').setLabel('Select').setStyle(ButtonStyle.Danger).setEmoji('🗡️')
+        new ButtonBuilder().setCustomId('tselect_ultra_weeklies').setLabel('Ultra Weeklies').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
+        new ButtonBuilder().setCustomId('tselect_ultra_dailies').setLabel('Ultra Dailies').setStyle(ButtonStyle.Danger).setEmoji('🗡️')
       );
 
       const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('tselect_void_auras').setLabel('Select').setStyle(ButtonStyle.Danger).setEmoji('💀'),
-        new ButtonBuilder().setCustomId('tselect_templeshrine').setLabel('Select').setStyle(ButtonStyle.Primary).setEmoji('⛩️')
+        new ButtonBuilder().setCustomId('tselect_void_auras').setLabel('Void Auras').setStyle(ButtonStyle.Danger).setEmoji('💀'),
+        new ButtonBuilder().setCustomId('tselect_templeshrine').setLabel('Temple Shrine').setStyle(ButtonStyle.Primary).setEmoji('⛩️')
       );
 
       const row3 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('tselect_7man_bosses').setLabel('Select').setStyle(ButtonStyle.Primary).setEmoji('👥'),
-        new ButtonBuilder().setCustomId('tselect_general_help').setLabel('Select').setStyle(ButtonStyle.Primary).setEmoji('🆘')
+        new ButtonBuilder().setCustomId('tselect_7man_bosses').setLabel('7-Man Bosses').setStyle(ButtonStyle.Primary).setEmoji('👥'),
+        new ButtonBuilder().setCustomId('tselect_general_help').setLabel('General Help').setStyle(ButtonStyle.Primary).setEmoji('🆘')
       );
 
       const row4 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('tselect_training').setLabel('Select').setStyle(ButtonStyle.Success).setEmoji('🎓')
+        new ButtonBuilder().setCustomId('tselect_training').setLabel('Training').setStyle(ButtonStyle.Success).setEmoji('🎓')
       );
 
       await targetChannel.send({ embeds: [embed], components: [row1, row2, row3, row4] });
       return interaction.editReply('✅ Ticket panel successfully posted!');
     }
 
-    // Open User Ticket Modal Handler
+    // User Ticket Open Modal Handler
     if (interaction.customId.startsWith('modal_openticket_')) {
       await interaction.deferReply({ ephemeral: true });
       const category = interaction.customId.replace('modal_openticket_', '');
@@ -472,6 +478,36 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.editReply('✅ Welcome Embed configured successfully!');
     }
 
+    // Leave Setup Modal Submission
+    if (interaction.customId.startsWith('leave_modal_')) {
+      await interaction.deferReply({ ephemeral: true });
+      const channelId = interaction.customId.split('_')[2];
+      const cfg = guildSettings.get(interaction.guild.id) || {};
+
+      cfg.leaveChannelId = channelId;
+      cfg.leaveTitle = interaction.fields.getTextInputValue('leave_title');
+      cfg.leaveDesc = interaction.fields.getTextInputValue('leave_desc');
+      cfg.leaveImage = interaction.fields.getTextInputValue('leave_image');
+
+      guildSettings.set(interaction.guild.id, cfg);
+      return interaction.editReply('✅ Leave Embed configured successfully!');
+    }
+
+    // Boost Setup Modal Submission
+    if (interaction.customId.startsWith('boost_modal_')) {
+      await interaction.deferReply({ ephemeral: true });
+      const channelId = interaction.customId.split('_')[2];
+      const cfg = guildSettings.get(interaction.guild.id) || {};
+
+      cfg.boostChannelId = channelId;
+      cfg.boostTitle = interaction.fields.getTextInputValue('boost_title');
+      cfg.boostDesc = interaction.fields.getTextInputValue('boost_desc');
+      cfg.boostImage = interaction.fields.getTextInputValue('boost_image');
+
+      guildSettings.set(interaction.guild.id, cfg);
+      return interaction.editReply('✅ Boost Embed configured successfully!');
+    }
+
     // Verification Modal Setup
     if (interaction.customId.startsWith('verify_modal_')) {
       await interaction.deferReply({ ephemeral: true });
@@ -496,7 +532,7 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.editReply('✅ Verification panel posted!');
     }
 
-    // Reaction Role Modal Handler
+    // Reaction Role Modal Handler (Editable up to 5 buttons with Custom Emojis)
     if (interaction.customId.startsWith('rr_modal_')) {
       await interaction.deferReply({ ephemeral: true });
       const channelId = interaction.customId.split('_')[2];
@@ -512,11 +548,11 @@ client.on('interactionCreate', async (interaction) => {
       let count = 0;
       for (const line of rolesInput) {
         if (count >= 5) break;
-        const [roleId, label] = line.split('|');
+        const [roleId, label, emoji] = line.split('|').map(s => s?.trim());
         if (roleId && label) {
-          row.addComponents(
-            new ButtonBuilder().setCustomId(`rr_${roleId.trim()}`).setLabel(label.trim()).setStyle(ButtonStyle.Primary)
-          );
+          const btn = new ButtonBuilder().setCustomId(`rr_${roleId}`).setLabel(label).setStyle(ButtonStyle.Primary);
+          if (emoji) btn.setEmoji(emoji);
+          row.addComponents(btn);
           count++;
         }
       }
@@ -575,32 +611,43 @@ client.on('interactionCreate', async (interaction) => {
       .setCustomId(`welcome_modal_${channel.id}`)
       .setTitle('Welcome Embed Setup');
 
-    const titleInput = new TextInputBuilder()
-      .setCustomId('welcome_title')
-      .setLabel('Welcome Title')
-      .setStyle(TextInputStyle.Short)
-      .setValue('Welcome to AQW Community Server!')
-      .setRequired(true);
+    const titleInput = new TextInputBuilder().setCustomId('welcome_title').setLabel('Welcome Title').setStyle(TextInputStyle.Short).setValue('Welcome to AQW Community Server!').setRequired(true);
+    const descInput = new TextInputBuilder().setCustomId('welcome_desc').setLabel('Description (Shift + Enter supported!)').setStyle(TextInputStyle.Paragraph).setValue('Hey there, {user}! We\'re glad to have you here.\n\n🔒 **Get Verified to Unlock the Server!**').setRequired(true);
+    const imageInput = new TextInputBuilder().setCustomId('welcome_image').setLabel('Banner Image URL').setStyle(TextInputStyle.Short).setRequired(false);
 
-    const descInput = new TextInputBuilder()
-      .setCustomId('welcome_desc')
-      .setLabel('Description (Shift + Enter supported!)')
-      .setStyle(TextInputStyle.Paragraph)
-      .setValue('Hey there, {user}! We\'re glad to have you here.\n\n🔒 **Get Verified to Unlock the Server!**')
-      .setRequired(true);
+    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput), new ActionRowBuilder().addComponents(imageInput));
+    return await interaction.showModal(modal);
+  }
 
-    const imageInput = new TextInputBuilder()
-      .setCustomId('welcome_image')
-      .setLabel('Banner Image URL')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(false);
+  // /leave-setup
+  if (commandName === 'leave-setup') {
+    const channel = options.getChannel('channel');
 
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(titleInput),
-      new ActionRowBuilder().addComponents(descInput),
-      new ActionRowBuilder().addComponents(imageInput)
-    );
+    const modal = new ModalBuilder()
+      .setCustomId(`leave_modal_${channel.id}`)
+      .setTitle('Leave Embed Setup');
 
+    const titleInput = new TextInputBuilder().setCustomId('leave_title').setLabel('Leave Title').setStyle(TextInputStyle.Short).setValue('Goodbye!').setRequired(true);
+    const descInput = new TextInputBuilder().setCustomId('leave_desc').setLabel('Description (Shift + Enter supported!)').setStyle(TextInputStyle.Paragraph).setValue('**{user}** has left the server.').setRequired(true);
+    const imageInput = new TextInputBuilder().setCustomId('leave_image').setLabel('Banner Image URL (Optional)').setStyle(TextInputStyle.Short).setRequired(false);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput), new ActionRowBuilder().addComponents(imageInput));
+    return await interaction.showModal(modal);
+  }
+
+  // /boost-setup
+  if (commandName === 'boost-setup') {
+    const channel = options.getChannel('channel');
+
+    const modal = new ModalBuilder()
+      .setCustomId(`boost_modal_${channel.id}`)
+      .setTitle('Boost Embed Setup');
+
+    const titleInput = new TextInputBuilder().setCustomId('boost_title').setLabel('Boost Title').setStyle(TextInputStyle.Short).setValue('Server Boosted! 🚀').setRequired(true);
+    const descInput = new TextInputBuilder().setCustomId('boost_desc').setLabel('Description (Shift + Enter supported!)').setStyle(TextInputStyle.Paragraph).setValue('Thank you **{user}** for boosting the server!').setRequired(true);
+    const imageInput = new TextInputBuilder().setCustomId('boost_image').setLabel('Banner Image URL (Optional)').setStyle(TextInputStyle.Short).setRequired(false);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput), new ActionRowBuilder().addComponents(imageInput));
     return await interaction.showModal(modal);
   }
 
@@ -616,16 +663,11 @@ client.on('interactionCreate', async (interaction) => {
     const descInput = new TextInputBuilder().setCustomId('embed_desc').setLabel('Description (Shift + Enter Supported)').setStyle(TextInputStyle.Paragraph).setRequired(true);
     const imageInput = new TextInputBuilder().setCustomId('embed_image').setLabel('Image URL (Optional)').setStyle(TextInputStyle.Short).setRequired(false);
 
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(titleInput),
-      new ActionRowBuilder().addComponents(descInput),
-      new ActionRowBuilder().addComponents(imageInput)
-    );
-
+    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput), new ActionRowBuilder().addComponents(imageInput));
     return await interaction.showModal(modal);
   }
 
-  // /reactionrole
+  // /reactionrole (Supports format: RoleID | Button Label | Emoji)
   if (commandName === 'reactionrole') {
     const channel = options.getChannel('channel');
 
@@ -637,17 +679,12 @@ client.on('interactionCreate', async (interaction) => {
     const descInput = new TextInputBuilder().setCustomId('rr_desc').setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(true);
     const rolesInput = new TextInputBuilder()
       .setCustomId('rr_roles')
-      .setLabel('Roles (Format: RoleID | Button Label)')
+      .setLabel('Roles (Format: RoleID | Label | Emoji)')
       .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder('1234567890 | Member\n0987654321 | VIP')
+      .setPlaceholder('1234567890 | Member | 👤\n0987654321 | VIP | ⭐')
       .setRequired(true);
 
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(titleInput),
-      new ActionRowBuilder().addComponents(descInput),
-      new ActionRowBuilder().addComponents(rolesInput)
-    );
-
+    modal.addComponents(new ActionRowBuilder().addComponents(titleInput), new ActionRowBuilder().addComponents(descInput), new ActionRowBuilder().addComponents(rolesInput));
     return await interaction.showModal(modal);
   }
 
