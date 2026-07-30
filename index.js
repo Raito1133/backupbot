@@ -20,7 +20,7 @@ const http = require('http');
 
 // --- ⚠️ CONFIGURATION ⚠️ ---
 const GUILD_ID = '1371775026264670228'; // Server ID
-const HELPER_ROLE_ID = '1529499021884919858'; // Replace with your @Ultra Helper Role ID
+const HELPER_ROLE_ID = 'YOUR_HELPER_ROLE_ID'; // Replace with your @Ultra Helper Role ID
 
 const client = new Client({
   intents: [
@@ -35,6 +35,7 @@ const client = new Client({
 // --- IN-MEMORY DATA STORES ---
 const activeTickets = new Map();
 const helperPoints = new Map();
+const userRequestCounts = new Map(); // Tracks requester ticket totals
 const guildSettings = new Map();
 const roleRewards = new Map(); // Points -> RoleID mapping
 
@@ -85,7 +86,7 @@ async function checkAndAssignHelperRoles(guild, userId, currentPoints) {
   }
 }
 
-// Helper to update control panel embed (Map/Room intentionally excluded for privacy)
+// Helper to update control panel embed
 async function updateTicketEmbed(channel, ticketData) {
   try {
     const pinnedMessages = await channel.messages.fetchPinned();
@@ -94,7 +95,7 @@ async function updateTicketEmbed(channel, ticketData) {
 
     const helpersList = ticketData.helpers.length > 0
       ? ticketData.helpers.map(id => `<@${id}>`).join('\n')
-      : 'None yet';
+      : 'None';
 
     const maxLimit = ticketData.maxHelpers || 6;
 
@@ -103,7 +104,7 @@ async function updateTicketEmbed(channel, ticketData) {
       { name: 'Requester:', value: `<@${ticketData.requesterId}>`, inline: true },
       { name: 'IGN:', value: `\`${ticketData.ign}\``, inline: true },
       { name: 'Server:', value: `\`${ticketData.server}\``, inline: true },
-      { name: 'Bosses', value: ticketData.description },
+      { name: 'Details', value: ticketData.description },
       { name: `👥 Helpers (${ticketData.helpers.length}/${maxLimit})`, value: helpersList }
     );
 
@@ -118,29 +119,29 @@ const commands = [
   new SlashCommandBuilder()
     .setName('ticket-setup')
     .setDescription('Post the interactive ticket setup panel')
-    .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post the panel in').setRequired(true))
+    .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
     .addStringOption(opt => opt.setName('title').setDescription('Embed title').setRequired(true))
-    .addStringOption(opt => opt.setName('description').setDescription('Embed description (use \\n for line breaks)').setRequired(true))
+    .addStringOption(opt => opt.setName('description').setDescription('Embed description').setRequired(true))
     
     // Button 1 Options
     .addStringOption(opt => opt.setName('btn1_label').setDescription('Button 1 Label').setRequired(true))
     .addStringOption(opt => opt.setName('btn1_emoji').setDescription('Button 1 Emoji (optional)').setRequired(false))
-    .addStringOption(opt => opt.setName('btn1_style').setDescription('Button 1 Style: Green, Red, Blue, Grey').setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn1_max').setDescription('Button 1 Helper Limit (1-6, Default: 6)').setMinValue(1).setMaxValue(6).setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn1_points').setDescription('Points to award for Button 1 (optional)').setMinValue(1).setRequired(false))
+    .addStringOption(opt => opt.setName('btn1_style').setDescription('Button 1 Style').setRequired(false))
+    .addIntegerOption(opt => opt.setName('btn1_max').setDescription('Helper Limit (1-6)').setMinValue(1).setMaxValue(6).setRequired(false))
+    .addIntegerOption(opt => opt.setName('btn1_points').setDescription('Points to award').setMinValue(1).setRequired(false))
 
     // Button 2 Options
-    .addStringOption(opt => opt.setName('btn2_label').setDescription('Button 2 Label (optional)').setRequired(false))
-    .addStringOption(opt => opt.setName('btn2_emoji').setDescription('Button 2 Emoji (optional)').setRequired(false))
-    .addStringOption(opt => opt.setName('btn2_style').setDescription('Button 2 Style (optional)').setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn2_max').setDescription('Button 2 Helper Limit (1-6, Default: 6)').setMinValue(1).setMaxValue(6).setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn2_points').setDescription('Points to award for Button 2 (optional)').setMinValue(1).setRequired(false))
+    .addStringOption(opt => opt.setName('btn2_label').setDescription('Button 2 Label').setRequired(false))
+    .addStringOption(opt => opt.setName('btn2_emoji').setDescription('Button 2 Emoji').setRequired(false))
+    .addStringOption(opt => opt.setName('btn2_style').setDescription('Button 2 Style').setRequired(false))
+    .addIntegerOption(opt => opt.setName('btn2_max').setDescription('Helper Limit (1-6)').setMinValue(1).setMaxValue(6).setRequired(false))
+    .addIntegerOption(opt => opt.setName('btn2_points').setDescription('Points to award').setMinValue(1).setRequired(false))
 
-    .addChannelOption(opt => opt.setName('category').setDescription('Category channel to place new tickets in').setRequired(false)),
+    .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false)),
 
   new SlashCommandBuilder()
-    .setName('helpers-leaderboard')
-    .setDescription('View top ticket helpers and points'),
+    .setName('leaderboard')
+    .setDescription('View top helpers and top requesters'),
 
   new SlashCommandBuilder()
     .setName('points')
@@ -148,35 +149,35 @@ const commands = [
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
     .addSubcommand(sub =>
       sub.setName('add')
-        .setDescription('Add points to a helper')
-        .addUserOption(opt => opt.setName('user').setDescription('Helper to give points').setRequired(true))
-        .addIntegerOption(opt => opt.setName('amount').setDescription('Amount of points').setRequired(true))
+        .setDescription('Add points to helper')
+        .addUserOption(opt => opt.setName('user').setDescription('User').setRequired(true))
+        .addIntegerOption(opt => opt.setName('amount').setDescription('Amount').setRequired(true))
     )
     .addSubcommand(sub =>
       sub.setName('remove')
-        .setDescription('Remove points from a helper')
-        .addUserOption(opt => opt.setName('user').setDescription('Helper to remove points from').setRequired(true))
-        .addIntegerOption(opt => opt.setName('amount').setDescription('Amount of points').setRequired(true))
+        .setDescription('Remove points from helper')
+        .addUserOption(opt => opt.setName('user').setDescription('User').setRequired(true))
+        .addIntegerOption(opt => opt.setName('amount').setDescription('Amount').setRequired(true))
     )
     .addSubcommand(sub =>
       sub.setName('reset')
-        .setDescription('Reset helper points')
-        .addUserOption(opt => opt.setName('user').setDescription('User to reset (leave blank to reset ALL helpers)').setRequired(false))
+        .setDescription('Reset points')
+        .addUserOption(opt => opt.setName('user').setDescription('User (Leave blank for ALL)').setRequired(false))
     ),
 
   new SlashCommandBuilder()
     .setName('helper-roles')
-    .setDescription('Configure automatic role rewards for helper points')
+    .setDescription('Configure role rewards')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
     .addSubcommand(sub =>
       sub.setName('add')
-        .setDescription('Set a role reward for achieving a point milestone')
+        .setDescription('Set point reward role')
         .addIntegerOption(opt => opt.setName('points').setDescription('Points required').setRequired(true))
-        .addRoleOption(opt => opt.setName('role').setDescription('Role to award').setRequired(true))
+        .addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true))
     )
     .addSubcommand(sub =>
       sub.setName('list')
-        .setDescription('View active point-to-role rewards')
+        .setDescription('View reward roles')
     )
 ];
 
@@ -184,26 +185,24 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 async function registerCommands() {
   try {
-    console.log('Registering Guild Slash Commands...');
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
     );
-    console.log('Slash Commands registered successfully!');
   } catch (error) {
-    console.error('Error registering slash commands:', error);
+    console.error('Error registering commands:', error);
   }
 }
 
-// --- BOT READY EVENT ---
+// --- BOT READY ---
 client.once(Events.ClientReady, async () => {
   console.log(`LoggedIn as ${client.user.tag}`);
 
   client.user.setPresence({
     status: 'dnd',
     activities: [{
-      name: 'AQW Helper Leaderboard',
-      type: 5 // Competing in
+      name: 'IM TIRED BOSS',
+      type: 5
     }]
   });
 
@@ -215,43 +214,42 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.guild || interaction.guild.id !== GUILD_ID) return;
 
   try {
-    // 1. TICKET PANEL BUTTON CLICK -> MODAL FORM
+    // 1. TICKET BUTTON CLICK -> MODAL
     if (interaction.isButton() && interaction.customId.startsWith('tselect_')) {
       const parts = interaction.customId.split('_');
-      // Format: tselect_[category]_[maxHelpers]_[customPoints]
       const customPoints = parts[parts.length - 1];
       const maxHelpers = parts[parts.length - 2];
       const categoryName = parts.slice(1, -2).join(' ');
 
       const modal = new ModalBuilder()
         .setCustomId(`ticket_form_${maxHelpers}_${customPoints}_${categoryName.replace(/\s+/g, '_')}`)
-        .setTitle(`Setup Ticket: ${categoryName}`);
+        .setTitle(`Ticket: ${categoryName}`);
 
       const ignInput = new TextInputBuilder()
         .setCustomId('ign')
         .setLabel('AQW IGN')
-        .setPlaceholder('Enter your in-game name...')
+        .setPlaceholder('Enter IGN...')
         .setStyle(TextInputStyle.Short)
         .setRequired(true);
 
       const serverInput = new TextInputBuilder()
         .setCustomId('server')
         .setLabel('Server')
-        .setPlaceholder('e.g., Artix, Safiria, Twilly')
+        .setPlaceholder('Artix, Safiria, etc.')
         .setStyle(TextInputStyle.Short)
         .setRequired(true);
 
       const mapInput = new TextInputBuilder()
         .setCustomId('map_name')
         .setLabel('Map Name')
-        .setPlaceholder('e.g., ultraezrajal, ultrawarden, timeinn')
+        .setPlaceholder('ultraezrajal, timeinn, etc.')
         .setStyle(TextInputStyle.Short)
         .setRequired(true);
 
       const descInput = new TextInputBuilder()
         .setCustomId('description')
-        .setLabel('Bosses / Help Details')
-        .setPlaceholder('List bosses or details on what you need help with...')
+        .setLabel('Details / Bosses')
+        .setPlaceholder('Details on what you need help with...')
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(true);
 
@@ -265,7 +263,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return await interaction.showModal(modal);
     }
 
-    // 2. MODAL SUBMIT -> CREATE TICKET CHANNEL
+    // 2. MODAL SUBMIT -> CREATE CHANNEL
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_form_')) {
       await interaction.deferReply({ ephemeral: true });
 
@@ -279,10 +277,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const rawMap = interaction.fields.getTextInputValue('map_name').trim();
       const description = interaction.fields.getTextInputValue('description');
 
-      // Clean up map name and append a random 4-digit room number
+      // Room generation
       const cleanMap = rawMap.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
       const random4Digit = Math.floor(1000 + Math.random() * 9000);
       const room = `/join ${cleanMap}-${random4Digit}`;
+
+      // Increment requester stats
+      const currentReqs = userRequestCounts.get(interaction.user.id) || 0;
+      userRequestCounts.set(interaction.user.id, currentReqs + 1);
 
       const cfg = guildSettings.get(interaction.guild.id) || {};
       const chName = `ticket-${ticketType}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
@@ -309,30 +311,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
         helpers: []
       });
 
-      // Embed NO LONGER includes Map/Room details directly
+      // Minimalist public embed
       const embed = new EmbedBuilder()
         .setTitle(`Ticket - ${ticketType}`)
         .addFields(
           { name: 'Requester:', value: `${interaction.user}`, inline: true },
           { name: 'IGN:', value: `\`${ign}\``, inline: true },
           { name: 'Server:', value: `\`${serverName}\``, inline: true },
-          { name: 'Bosses', value: description },
-          { name: `👥 Helpers (0/${maxHelpers})`, value: 'None yet' }
+          { name: 'Details', value: description },
+          { name: `👥 Helpers (0/${maxHelpers})`, value: 'None' }
         )
-        .setColor('#3b82f6')
+        .setColor('#2b2d31')
         .setTimestamp();
 
-      const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_showroom').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
-        new ButtonBuilder().setCustomId('btn_info').setLabel('!').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept Request').setStyle(ButtonStyle.Success).setEmoji('✅'),
-        new ButtonBuilder().setCustomId('btn_leave').setLabel('Step Down').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
-        new ButtonBuilder().setCustomId('btn_pinghelpers').setLabel('Call Squad').setStyle(ButtonStyle.Secondary).setEmoji('📢')
-      );
-
-      const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_cancel').setLabel('Close Request').setStyle(ButtonStyle.Danger).setEmoji('❌'),
-        new ButtonBuilder().setCustomId('btn_complete').setLabel('Finish & Pay Out').setStyle(ButtonStyle.Primary).setEmoji('✅')
+      // Minimalist Single Row Action Buttons
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_location').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
+        new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept').setStyle(ButtonStyle.Success).setEmoji('✅'),
+        new ButtonBuilder().setCustomId('btn_leave').setLabel('Leave').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('btn_pinghelpers').setLabel('Ping').setStyle(ButtonStyle.Secondary).setEmoji('📢'),
+        new ButtonBuilder().setCustomId('btn_cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('btn_complete').setLabel('Complete').setStyle(ButtonStyle.Primary)
       );
 
       const helperRolePing = HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper';
@@ -340,24 +339,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const mainMsg = await ticketChannel.send({ 
         content: `Hey ${interaction.user}! ${helperRolePing}`, 
         embeds: [embed], 
-        components: [row1, row2] 
+        components: [row] 
       });
       await mainMsg.pin().catch(() => {});
 
-      await ticketChannel.send({
-        content: `📌 **${interaction.user}** - Once finished, click **Finish & Pay Out** to resolve this ticket and automatically award helper points!`
-      });
-
-      return await interaction.editReply(`Ticket created: ${ticketChannel}`);
+      return await interaction.editReply(`Created: ${ticketChannel}`);
     }
 
-    // 3. TICKET ACTION BUTTONS HANDLER
+    // 3. TICKET ACTIONS
     if (interaction.isButton()) {
       const ticketData = activeTickets.get(interaction.channel.id);
       const customId = interaction.customId;
 
-      if (customId === 'btn_showroom' || customId === 'btn_info') {
-        if (!ticketData) return interaction.reply({ content: '❌ Ticket details not found.', ephemeral: true });
+      // Single Location & Info Access
+      if (customId === 'btn_location') {
+        if (!ticketData) return interaction.reply({ content: '❌ Ticket not found.', ephemeral: true });
 
         const isRequester = interaction.user.id === ticketData.requesterId;
         const isHelper = ticketData.helpers.includes(interaction.user.id);
@@ -365,31 +361,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         if (!isRequester && !isHelper && !isAdmin) {
           return interaction.reply({
-            content: '🔒 **Access Denied:** You must click **Accept Request** first to view the room and player details.',
+            content: '🔒 **Access Denied:** Click **Accept** first to view the private location.',
             ephemeral: true
           });
         }
 
-        if (customId === 'btn_showroom') {
-          return interaction.reply({
-            content: `📍 **Room Details (Private):**\n**Server:** \`${ticketData.server}\`\n**Map/Room:** \`${ticketData.room}\``,
-            ephemeral: true
-          });
-        }
-
-        if (customId === 'btn_info') {
-          return interaction.reply({
-            content: `ℹ️ **IGN:** \`${ticketData.ign}\`\n**Details:** ${ticketData.description}`,
-            ephemeral: true
-          });
-        }
+        return interaction.reply({
+          content: `📍 **Private Location Details:**\n• **IGN:** \`${ticketData.ign}\`\n• **Server:** \`${ticketData.server}\`\n• **Room:** \`${ticketData.room}\``,
+          ephemeral: true
+        });
       }
 
       if (customId === 'btn_claim') {
-        if (!ticketData) return interaction.reply({ content: '❌ Ticket details not found.', ephemeral: true });
+        if (!ticketData) return interaction.reply({ content: '❌ Ticket not found.', ephemeral: true });
 
         if (ticketData.helpers.includes(interaction.user.id)) {
-          return interaction.reply({ content: '⚠️ You have already accepted this request!', ephemeral: true });
+          return interaction.reply({ content: '⚠️ You already accepted!', ephemeral: true });
         }
 
         const maxAllowed = ticketData.maxHelpers || 6;
@@ -402,14 +389,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const spotsLeft = maxAllowed - ticketData.helpers.length;
 
-        // Public announcement in the channel (without exposing room)
         await interaction.channel.send({
-          content: `✅ **${interaction.user}** accepted the request! **${spotsLeft}** spot(s) remaining.`
+          content: `✅ ${interaction.user} joined the team. (${spotsLeft} left)`
         });
 
-        // Ephemeral reply only to the helper with room info!
         await interaction.reply({
-          content: `✅ **Request Accepted!** Here are the private room details:\n📍 **Server:** \`${ticketData.server}\`\n📍 **Map/Room:** \`${ticketData.room}\``,
+          content: `✅ **Accepted!** Room Info:\n📍 **Server:** \`${ticketData.server}\`\n📍 **Room:** \`${ticketData.room}\``,
           ephemeral: true
         });
 
@@ -417,50 +402,43 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       if (customId === 'btn_leave') {
-        if (!ticketData) return interaction.reply({ content: '❌ Ticket details not found.', ephemeral: true });
+        if (!ticketData) return interaction.reply({ content: '❌ Ticket not found.', ephemeral: true });
 
         if (!ticketData.helpers.includes(interaction.user.id)) {
-          return interaction.reply({ content: '⚠️ You are not listed as a helper.', ephemeral: true });
+          return interaction.reply({ content: '⚠️ You are not on this ticket.', ephemeral: true });
         }
 
         ticketData.helpers = ticketData.helpers.filter(id => id !== interaction.user.id);
         activeTickets.set(interaction.channel.id, ticketData);
 
-        await interaction.reply({ content: `🚪 **${interaction.user}** stepped down from this ticket.` });
+        await interaction.reply({ content: `🚪 ${interaction.user} stepped down.` });
         return updateTicketEmbed(interaction.channel, ticketData);
       }
 
       if (customId === 'btn_pinghelpers') {
         const helperRolePing = HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper';
-        return interaction.reply({ content: `📢 ${helperRolePing} — Squad assistance requested in this ticket!` });
+        return interaction.reply({ content: `📢 ${helperRolePing} assistance requested!` });
       }
 
       if (customId === 'btn_cancel') {
         if (ticketData && interaction.user.id !== ticketData.requesterId && !interaction.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-          return interaction.reply({ content: '❌ Only the requester or staff can close this request.', ephemeral: true });
+          return interaction.reply({ content: '❌ Only requester or staff can cancel.', ephemeral: true });
         }
 
-        await interaction.reply('❌ Request closed. Deleting channel in 3 seconds...');
+        await interaction.reply('❌ Closed. Deleting in 3s...');
         activeTickets.delete(interaction.channel.id);
         setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
         return;
       }
 
       if (customId === 'btn_complete') {
-        // Restrict complete action to requester or staff members
         if (ticketData && interaction.user.id !== ticketData.requesterId && !interaction.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-          return interaction.reply({
-            content: '❌ Only the ticket requester or staff members can finish and pay out this request.',
-            ephemeral: true
-          });
+          return interaction.reply({ content: '❌ Only requester or staff can complete.', ephemeral: true });
         }
 
         await interaction.deferReply();
 
         await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
-        if (ticketData) {
-          await interaction.channel.permissionOverwrites.edit(ticketData.requesterId, { SendMessages: false });
-        }
 
         let awardedText = '';
         if (ticketData && ticketData.helpers.length > 0) {
@@ -475,14 +453,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
 
           const helperMentions = ticketData.helpers.map(id => `<@${id}>`).join(', ');
-          awardedText = `\n\n🏆 **+${pointsToAward} Helper Point(s)** automatically awarded to: ${helperMentions}`;
+          awardedText = `\n🏆 **+${pointsToAward} pts** awarded to: ${helperMentions}`;
         } else {
-          awardedText = '\n\n⚠️ No helpers accepted this request, so no points were awarded.';
+          awardedText = '\n⚠️ No helpers accepted.';
         }
 
         const embed = new EmbedBuilder()
-          .setTitle('🔒 Ticket Resolved')
-          .setDescription(`This request has been finished and closed!${awardedText}`)
+          .setTitle('🔒 Ticket Completed')
+          .setDescription(`Resolved and closed!${awardedText}`)
           .setColor('#2ecc71')
           .setTimestamp();
 
@@ -492,7 +470,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // 4. SLASH COMMAND EXECUTION
+    // 4. COMMANDS
     if (interaction.isChatInputCommand()) {
       const { commandName, options } = interaction;
 
@@ -512,12 +490,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const embed = new EmbedBuilder()
           .setTitle(title)
           .setDescription(desc)
-          .setColor('#2b2d31')
-          .setFooter({ text: 'Fill out the form after clicking a button to open a ticket.' });
+          .setColor('#2b2d31');
 
         const row = new ActionRowBuilder();
 
-        // Button 1 logic
         const b1Label = options.getString('btn1_label');
         const b1Emoji = options.getString('btn1_emoji');
         const b1Style = options.getString('btn1_style');
@@ -531,7 +507,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (b1Emoji) btn1.setEmoji(b1Emoji);
         row.addComponents(btn1);
 
-        // Button 2 logic
         const b2Label = options.getString('btn2_label');
         if (b2Label) {
           const b2Emoji = options.getString('btn2_emoji');
@@ -548,21 +523,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         await channel.send({ embeds: [embed], components: [row] });
-        return await interaction.editReply('✅ Ticket panel posted successfully!');
+        return await interaction.editReply('✅ Panel posted!');
       }
 
-      if (commandName === 'helpers-leaderboard') {
-        if (helperPoints.size === 0) {
-          return await interaction.reply({ content: '📊 No helper points recorded yet!', ephemeral: true });
-        }
+      // Minimalist Dual Leaderboard
+      if (commandName === 'leaderboard') {
+        const sortedHelpers = [...helperPoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+        const sortedRequesters = [...userRequestCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-        const sorted = [...helperPoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
-        const leaderboardStr = sorted.map(([id, pts], index) => `**${index + 1}.** <@${id}> — **${pts}** pts`).join('\n');
+        const helpersStr = sortedHelpers.length > 0
+          ? sortedHelpers.map(([id, pts], i) => `**${i + 1}.** <@${id}> — \`${pts} pts\``).join('\n')
+          : 'No helper data yet';
+
+        const requestersStr = sortedRequesters.length > 0
+          ? sortedRequesters.map(([id, reqs], i) => `**${i + 1}.** <@${id}> — \`${reqs} tickets\``).join('\n')
+          : 'No request data yet';
 
         const lbEmbed = new EmbedBuilder()
-          .setTitle('🏆 Top Ticket Helpers')
-          .setDescription(leaderboardStr)
-          .setColor('#f1c40f')
+          .setTitle('📊 Server Activity Leaderboard')
+          .addFields(
+            { name: '🏆 Top Helpers', value: helpersStr, inline: true },
+            { name: '📩 Top Requesters', value: requestersStr, inline: true }
+          )
+          .setColor('#2b2d31')
           .setTimestamp();
 
         return await interaction.reply({ embeds: [lbEmbed] });
@@ -579,7 +562,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           helperPoints.set(targetUser.id, updated);
 
           await checkAndAssignHelperRoles(interaction.guild, targetUser.id, updated);
-          return await interaction.reply({ content: `✅ Added **${amount}** points to ${targetUser}. Total: **${updated}** pts.`, ephemeral: true });
+          return await interaction.reply({ content: `✅ Gave **${amount}** pts to ${targetUser}. Total: **${updated}**`, ephemeral: true });
         }
 
         if (sub === 'remove') {
@@ -587,16 +570,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const current = helperPoints.get(targetUser.id) || 0;
           const updated = Math.max(0, current - amount);
           helperPoints.set(targetUser.id, updated);
-          return await interaction.reply({ content: `✅ Removed **${amount}** points from ${targetUser}. Total: **${updated}** pts.`, ephemeral: true });
+          return await interaction.reply({ content: `✅ Removed **${amount}** pts from ${targetUser}. Total: **${updated}**`, ephemeral: true });
         }
 
         if (sub === 'reset') {
           if (targetUser) {
             helperPoints.delete(targetUser.id);
-            return await interaction.reply({ content: `✅ Reset helper points for ${targetUser}.`, ephemeral: true });
+            return await interaction.reply({ content: `✅ Reset points for ${targetUser}.`, ephemeral: true });
           } else {
             helperPoints.clear();
-            return await interaction.reply({ content: '✅ Reset all helper points on the leaderboard!', ephemeral: true });
+            return await interaction.reply({ content: '✅ Reset all helper points!', ephemeral: true });
           }
         }
       }
@@ -610,43 +593,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           roleRewards.set(requiredPts, role.id);
           return await interaction.reply({
-            content: `✅ Added auto-role reward! Reach **${requiredPts} points** to automatically earn the ${role} role.`,
+            content: `✅ Role ${role} set for **${requiredPts} pts**.`,
             ephemeral: true
           });
         }
 
         if (sub === 'list') {
           if (roleRewards.size === 0) {
-            return await interaction.reply({ content: '⚙️ No point-based role rewards configured yet.', ephemeral: true });
+            return await interaction.reply({ content: '⚙️ No role rewards set.', ephemeral: true });
           }
 
           const sorted = [...roleRewards.entries()].sort((a, b) => a[0] - b[0]);
-          const rewardList = sorted.map(([pts, roleId]) => `• **${pts} Points** $\\rightarrow$ <@&${roleId}>`).join('\n');
+          const rewardList = sorted.map(([pts, roleId]) => `• **${pts} Pts** $\\rightarrow$ <@&${roleId}>`).join('\n');
 
           const embed = new EmbedBuilder()
-            .setTitle('🏅 Helper Role Rewards')
+            .setTitle('🏅 Role Rewards')
             .setDescription(rewardList)
-            .setColor('#3498db');
+            .setColor('#2b2d31');
 
           return await interaction.reply({ embeds: [embed], ephemeral: true });
         }
       }
     }
   } catch (error) {
-    console.error('Interaction Error:', error);
-    const errorMsg = `❌ Error processing request: ${error.message}`;
-    if (interaction.deferred || interaction.replied) {
-      await interaction.editReply({ content: errorMsg }).catch(() => {});
-    } else {
-      await interaction.reply({ content: errorMsg, ephemeral: true }).catch(() => {});
-    }
+    console.error('Error:', error);
   }
 });
 
 // --- LOGIN ---
 client.login(process.env.DISCORD_TOKEN);
 
-// --- HTTP SERVER FOR KEEP-ALIVE ---
+// --- HTTP SERVER ---
 http.createServer((req, res) => {
   res.write("Bot is alive!");
   res.end();
