@@ -22,12 +22,6 @@ const http = require('http');
 const GUILD_ID = '1371775026264670228'; // Server ID
 const HELPER_ROLE_ID = 'YOUR_HELPER_ROLE_ID'; // Replace with your @Ultra Helper Role ID
 
-// Ensure DISCORD_TOKEN is set before starting
-if (!process.env.DISCORD_TOKEN) {
-  console.error('❌ FATAL ERROR: DISCORD_TOKEN environment variable is not defined.');
-  process.exit(1);
-}
-
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -131,8 +125,8 @@ const commands = [
     
     // Button 1 Options
     .addStringOption(opt => opt.setName('btn1_label').setDescription('Button 1 Label').setRequired(true))
-    .addStringOption(opt => opt.setName('btn1_emoji').setDescription('Button 1 Emoji').setRequired(false))
-    .addStringOption(opt => opt.setName('btn1_style').setDescription('Button 1 Style (green, red, blue, grey)').setRequired(false))
+    .addStringOption(opt => opt.setName('btn1_emoji').setDescription('Button 1 Emoji (optional)').setRequired(false))
+    .addStringOption(opt => opt.setName('btn1_style').setDescription('Button 1 Style').setRequired(false))
     .addIntegerOption(opt => opt.setName('btn1_max').setDescription('Helper Limit (1-6)').setMinValue(1).setMaxValue(6).setRequired(false))
     .addIntegerOption(opt => opt.setName('btn1_points').setDescription('Points to award').setMinValue(1).setRequired(false))
 
@@ -142,27 +136,6 @@ const commands = [
     .addStringOption(opt => opt.setName('btn2_style').setDescription('Button 2 Style').setRequired(false))
     .addIntegerOption(opt => opt.setName('btn2_max').setDescription('Helper Limit (1-6)').setMinValue(1).setMaxValue(6).setRequired(false))
     .addIntegerOption(opt => opt.setName('btn2_points').setDescription('Points to award').setMinValue(1).setRequired(false))
-
-    // Button 3 Options
-    .addStringOption(opt => opt.setName('btn3_label').setDescription('Button 3 Label').setRequired(false))
-    .addStringOption(opt => opt.setName('btn3_emoji').setDescription('Button 3 Emoji').setRequired(false))
-    .addStringOption(opt => opt.setName('btn3_style').setDescription('Button 3 Style').setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn3_max').setDescription('Helper Limit (1-6)').setMinValue(1).setMaxValue(6).setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn3_points').setDescription('Points to award').setMinValue(1).setRequired(false))
-
-    // Button 4 Options
-    .addStringOption(opt => opt.setName('btn4_label').setDescription('Button 4 Label').setRequired(false))
-    .addStringOption(opt => opt.setName('btn4_emoji').setDescription('Button 4 Emoji').setRequired(false))
-    .addStringOption(opt => opt.setName('btn4_style').setDescription('Button 4 Style').setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn4_max').setDescription('Helper Limit (1-6)').setMinValue(1).setMaxValue(6).setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn4_points').setDescription('Points to award').setMinValue(1).setRequired(false))
-
-    // Button 5 Options
-    .addStringOption(opt => opt.setName('btn5_label').setDescription('Button 5 Label').setRequired(false))
-    .addStringOption(opt => opt.setName('btn5_emoji').setDescription('Button 5 Emoji').setRequired(false))
-    .addStringOption(opt => opt.setName('btn5_style').setDescription('Button 5 Style').setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn5_max').setDescription('Helper Limit (1-6)').setMinValue(1).setMaxValue(6).setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn5_points').setDescription('Points to award').setMinValue(1).setRequired(false))
 
     .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false)),
 
@@ -212,22 +185,18 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 async function registerCommands() {
   try {
-    if (!client.user) {
-      throw new Error('Client user is not available yet.');
-    }
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
     );
-    console.log('✅ Guild slash commands registered successfully!');
   } catch (error) {
-    console.error('❌ Error registering commands:', error);
+    console.error('Error registering commands:', error);
   }
 }
 
 // --- BOT READY ---
 client.once(Events.ClientReady, async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`LoggedIn as ${client.user.tag}`);
 
   client.user.setPresence({
     status: 'dnd',
@@ -356,7 +325,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setColor('#2b2d31')
           .setTimestamp();
 
-        // Row 1: Active Actions
+        // Row 1: Active Actions (Max 5 buttons per row allowed by Discord API)
         const row1 = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('btn_location').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
           new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept').setStyle(ButtonStyle.Success).setEmoji('✅'),
@@ -534,23 +503,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const row = new ActionRowBuilder();
 
-        // Dynamically add up to 5 buttons if configured in the slash command
-        for (let i = 1; i <= 5; i++) {
-          const label = options.getString(`btn${i}_label`);
-          if (label) {
-            const emoji = options.getString(`btn${i}_emoji`);
-            const style = options.getString(`btn${i}_style`);
-            const max = options.getInteger(`btn${i}_max`) || 6;
-            const points = options.getInteger(`btn${i}_points`) || 0;
+        const b1Label = options.getString('btn1_label');
+        const b1Emoji = options.getString('btn1_emoji');
+        const b1Style = options.getString('btn1_style');
+        const b1Max = options.getInteger('btn1_max') || 6;
+        const b1Points = options.getInteger('btn1_points') || 0;
 
-            const btn = new ButtonBuilder()
-              .setCustomId(`tselect_${label.toLowerCase().replace(/\s+/g, '_')}_${max}_${points}`)
-              .setLabel(label)
-              .setStyle(parseButtonStyle(style));
+        const btn1 = new ButtonBuilder()
+          .setCustomId(`tselect_${b1Label.toLowerCase().replace(/\s+/g, '_')}_${b1Max}_${b1Points}`)
+          .setLabel(b1Label)
+          .setStyle(parseButtonStyle(b1Style));
+        if (b1Emoji) btn1.setEmoji(b1Emoji);
+        row.addComponents(btn1);
 
-            if (emoji) btn.setEmoji(emoji);
-            row.addComponents(btn);
-          }
+        const b2Label = options.getString('btn2_label');
+        if (b2Label) {
+          const b2Emoji = options.getString('btn2_emoji');
+          const b2Style = options.getString('btn2_style');
+          const b2Max = options.getInteger('btn2_max') || 6;
+          const b2Points = options.getInteger('btn2_points') || 0;
+
+          const btn2 = new ButtonBuilder()
+            .setCustomId(`tselect_${b2Label.toLowerCase().replace(/\s+/g, '_')}_${b2Max}_${b2Points}`)
+            .setLabel(b2Label)
+            .setStyle(parseButtonStyle(b2Style));
+          if (b2Emoji) btn2.setEmoji(b2Emoji);
+          row.addComponents(btn2);
         }
 
         await channel.send({ embeds: [embed], components: [row] });
@@ -635,7 +613,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
 
           const sorted = [...roleRewards.entries()].sort((a, b) => a[0] - b[0]);
-          const rewardList = sorted.map(([pts, roleId]) => `• **${pts} Pts** -> <@&${roleId}>`).join('\n');
+          const rewardList = sorted.map(([pts, roleId]) => `• **${pts} Pts** $\\rightarrow$ <@&${roleId}>`).join('\n');
 
           const embed = new EmbedBuilder()
             .setTitle('🏅 Role Rewards')
@@ -647,21 +625,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
   } catch (error) {
-    console.error('Error during interaction handling:', error);
+    console.error('Error:', error);
   }
 });
 
+// --- LOGIN ---
+client.login(process.env.DISCORD_TOKEN);
+
 // --- HTTP SERVER FOR KEEP-ALIVE ---
-const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.write("Bot is alive!");
   res.end();
-}).listen(PORT, () => {
-  console.log(`🌐 HTTP Keep-Alive Server listening on port ${PORT}`);
-});
-
-// --- LOGIN ---
-client.login(process.env.DISCORD_TOKEN).catch(err => {
-  console.error('❌ Failed to log in to Discord:', err);
-  process.exit(1);
-});
+}).listen(process.env.PORT || 3000);
