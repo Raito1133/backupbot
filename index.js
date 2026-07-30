@@ -18,7 +18,7 @@ const {
 } = require('discord.js');
 const http = require('http');
 
-// --- GLOBAL PROCESS CRASH PROTECTION ---
+// --- ⚠️ GLOBAL CRASH PROTECTION ⚠️ ---
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
@@ -103,8 +103,8 @@ async function updateTicketEmbed(channel, ticketData) {
   }
 }
 
-// --- SLASH COMMANDS REGISTRATION ---
-// 3 Base options + 4 options x 5 buttons = 23 options total (Safely under 25 Discord limit)
+// --- SLASH COMMAND DEFINITIONS ---
+// 4 options x 5 buttons = 20 + 3 base options = 23 total options (Safely under 25 limit)
 const setupCommand = new SlashCommandBuilder()
   .setName('ticket-setup')
   .setDescription('Post the interactive ticket setup panel')
@@ -114,8 +114,8 @@ const setupCommand = new SlashCommandBuilder()
   .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false));
 
 for (let i = 1; i <= 5; i++) {
-  setupCommand.addStringOption(opt => opt.setName(`btn${i}_label`).setDescription(`Btn ${i} Label (e.g. "⚔️ Ultra Weeklies")`).setRequired(i === 1));
-  setupCommand.addRoleOption(opt => opt.setName(`btn${i}_role`).setDescription(`Role to mention for Btn ${i}`).setRequired(false));
+  setupCommand.addStringOption(opt => opt.setName(`btn${i}_label`).setDescription(`Btn ${i} Label`).setRequired(i === 1));
+  setupCommand.addRoleOption(opt => opt.setName(`btn${i}_role`).setDescription(`Role to ping for Btn ${i}`).setRequired(false));
   setupCommand.addIntegerOption(opt => opt.setName(`btn${i}_max`).setDescription(`Helper Limit (1-6)`).setMinValue(1).setMaxValue(6).setRequired(false));
   setupCommand.addIntegerOption(opt => opt.setName(`btn${i}_points`).setDescription(`Points awarded`).setMinValue(1).setRequired(false));
 }
@@ -164,17 +164,29 @@ const commands = [
     )
 ];
 
+// --- FORCE CLEAR & RE-REGISTER COMMANDS ---
 async function registerCommands() {
-  if (!process.env.DISCORD_TOKEN) return;
+  if (!process.env.DISCORD_TOKEN) {
+    console.error('❌ DISCORD_TOKEN is missing in Environment Variables!');
+    return;
+  }
 
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
-    console.log('🔄 Registering slash commands...');
+    console.log('🔄 Wiping old command cache...');
+    
+    // Wipe global cache
+    await rest.put(Routes.applicationCommands(client.user.id), { body: [] }).catch(() => {});
+    
+    // Wipe guild cache
+    await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: [] });
+
+    console.log('🔄 Registering updated slash commands...');
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
     );
-    console.log('✅ Slash commands registered successfully!');
+    console.log('✅ Slash commands updated and synced successfully!');
   } catch (error) {
     console.error('❌ Error registering slash commands:', error);
   }
@@ -195,7 +207,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.guild || interaction.guild.id !== GUILD_ID) return;
 
   try {
-    // 1. TICKET BUTTON CLICK -> MODAL
+    // 1. BUTTON CLICK -> MODAL
     if (interaction.isButton() && interaction.customId.startsWith('tselect_')) {
       const parts = interaction.customId.split('_');
       const roleId = parts[parts.length - 1];
@@ -318,7 +330,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           new ButtonBuilder().setCustomId('btn_complete').setLabel('Complete').setStyle(ButtonStyle.Primary)
         );
 
-        // Ping specific button role if assigned, otherwise fallback to global helper role
         const rolePing = targetRoleId && targetRoleId !== 'none'
           ? `<@&${targetRoleId}>`
           : (DEFAULT_HELPER_ROLE !== 'YOUR_HELPER_ROLE_ID' ? `<@&${DEFAULT_HELPER_ROLE}>` : '@Helper');
@@ -337,7 +348,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // 3. TICKET BUTTON ACTIONS
+    // 3. TICKET ACTION BUTTONS
     if (interaction.isButton()) {
       const ticketData = activeTickets.get(interaction.channel.id);
       const customId = interaction.customId;
@@ -351,7 +362,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         if (!isRequester && !isHelper && !isAdmin) {
           return interaction.reply({
-            content: '🔒 **Access Denied:** Click **Accept** first to view the private location.',
+            content: '🔒 **Access Denied:** Click **Accept** first to view private details.',
             ephemeral: true
           });
         }
@@ -462,7 +473,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // 4. COMMAND HANDLERS
+    // 4. CHAT COMMANDS
     if (interaction.isChatInputCommand()) {
       const { commandName, options } = interaction;
 
@@ -504,7 +515,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         await channel.send({ embeds: [embed], components: [row] });
-        return await interaction.editReply('✅ Panel posted with custom role mentions!');
+        return await interaction.editReply('✅ Panel posted with updated role mentions!');
       }
 
       if (commandName === 'leaderboard') {
@@ -609,7 +620,7 @@ if (!process.env.DISCORD_TOKEN) {
   });
 }
 
-// --- HTTP KEEP-ALIVE SERVER ---
+// --- KEEP-ALIVE HTTP SERVER ---
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.write("Bot is alive!");
