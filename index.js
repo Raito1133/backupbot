@@ -13,7 +13,8 @@ const {
   PermissionsBitField,
   REST,
   Routes,
-  SlashCommandBuilder
+  SlashCommandBuilder,
+  ChannelType
 } = require('discord.js');
 const http = require('http');
 
@@ -214,7 +215,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setColor('#3b82f6')
         .setTimestamp();
 
-      // Control buttons row matching your layout
+      // Control buttons row
       const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('btn_showroom').setLabel('Show Room').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
         new ButtonBuilder().setCustomId('btn_info').setLabel('!').setStyle(ButtonStyle.Secondary),
