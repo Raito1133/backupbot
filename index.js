@@ -122,10 +122,11 @@ const commands = [
     .addStringOption(opt => opt.setName('btn1_label').setDescription('Button 1 Label').setRequired(true))
     .addStringOption(opt => opt.setName('btn1_emoji').setDescription('Button 1 Emoji (optional)').setRequired(false))
     .addStringOption(opt => opt.setName('btn1_style').setDescription('Button 1 Style: Green, Red, Blue, Grey').setRequired(false))
+    .addIntegerOption(opt => opt.setName('btn1_max').setDescription('Button 1 Helper Limit (1-6, Default: 6)').setMinValue(1).setMaxValue(6).setRequired(false))
     .addStringOption(opt => opt.setName('btn2_label').setDescription('Button 2 Label (optional)').setRequired(false))
     .addStringOption(opt => opt.setName('btn2_emoji').setDescription('Button 2 Emoji (optional)').setRequired(false))
     .addStringOption(opt => opt.setName('btn2_style').setDescription('Button 2 Style (optional)').setRequired(false))
-    .addIntegerOption(opt => opt.setName('max_helpers').setDescription('Max helpers allowed for this panel (1-6, Default: 6)').setMinValue(1).setMaxValue(6).setRequired(false))
+    .addIntegerOption(opt => opt.setName('btn2_max').setDescription('Button 2 Helper Limit (1-6, Default: 6)').setMinValue(1).setMaxValue(6).setRequired(false))
     .addChannelOption(opt => opt.setName('category').setDescription('Category channel to place new tickets in').setRequired(false)),
 
   new SlashCommandBuilder()
@@ -192,7 +193,7 @@ client.once(Events.ClientReady, async () => {
   client.user.setPresence({
     status: 'dnd',
     activities: [{
-      name: 'Please',
+      name: 'AQW Helper Leaderboard',
       type: 5 // Competing in
     }]
   });
@@ -208,7 +209,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // 1. TICKET PANEL BUTTON CLICK -> MODAL FORM
     if (interaction.isButton() && interaction.customId.startsWith('tselect_')) {
       const parts = interaction.customId.split('_');
-      const maxHelpers = parts[parts.length - 1]; // Parse custom max helpers limit from button ID
+      const maxHelpers = parts[parts.length - 1]; // Get max helpers from button customId
       const categoryName = parts.slice(1, -1).join(' ');
 
       const modal = new ModalBuilder()
@@ -466,7 +467,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const title = options.getString('title');
         const desc = options.getString('description').replace(/\\n/g, '\n');
         const category = options.getChannel('category');
-        const maxHelpers = options.getInteger('max_helpers') || 6;
 
         if (category) {
           const cfg = guildSettings.get(interaction.guild.id) || {};
@@ -482,22 +482,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const row = new ActionRowBuilder();
 
+        // Button 1 logic & limit
         const b1Label = options.getString('btn1_label');
         const b1Emoji = options.getString('btn1_emoji');
         const b1Style = options.getString('btn1_style');
+        const b1Max = options.getInteger('btn1_max') || 6;
+
         const btn1 = new ButtonBuilder()
-          .setCustomId(`tselect_${b1Label.toLowerCase().replace(/\s+/g, '_')}_${maxHelpers}`)
+          .setCustomId(`tselect_${b1Label.toLowerCase().replace(/\s+/g, '_')}_${b1Max}`)
           .setLabel(b1Label)
           .setStyle(parseButtonStyle(b1Style));
         if (b1Emoji) btn1.setEmoji(b1Emoji);
         row.addComponents(btn1);
 
+        // Button 2 logic & limit
         const b2Label = options.getString('btn2_label');
         if (b2Label) {
           const b2Emoji = options.getString('btn2_emoji');
           const b2Style = options.getString('btn2_style');
+          const b2Max = options.getInteger('btn2_max') || 6;
+
           const btn2 = new ButtonBuilder()
-            .setCustomId(`tselect_${b2Label.toLowerCase().replace(/\s+/g, '_')}_${maxHelpers}`)
+            .setCustomId(`tselect_${b2Label.toLowerCase().replace(/\s+/g, '_')}_${b2Max}`)
             .setLabel(b2Label)
             .setStyle(parseButtonStyle(b2Style));
           if (b2Emoji) btn2.setEmoji(b2Emoji);
@@ -505,7 +511,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         await channel.send({ embeds: [embed], components: [row] });
-        return await interaction.editReply(`✅ Ticket panel posted with max helper capacity set to **${maxHelpers}**!`);
+        return await interaction.editReply('✅ Ticket panel posted successfully!');
       }
 
       if (commandName === 'helpers-leaderboard') {
