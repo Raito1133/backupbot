@@ -201,7 +201,7 @@ client.once(Events.ClientReady, async () => {
   client.user.setPresence({
     status: 'dnd',
     activities: [{
-      name: 'IM TIRED BOSS',
+      name: 'AQW Leaderboard',
       type: 5
     }]
   });
@@ -267,83 +267,92 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_form_')) {
       await interaction.deferReply({ ephemeral: true });
 
-      const parts = interaction.customId.replace('ticket_form_', '').split('_');
-      const maxHelpers = parseInt(parts[0]) || 6;
-      const customPoints = parseInt(parts[1]) || 0;
-      const ticketType = parts.slice(2).join(' ');
+      try {
+        const parts = interaction.customId.replace('ticket_form_', '').split('_');
+        const maxHelpers = parseInt(parts[0]) || 6;
+        const customPoints = parseInt(parts[1]) || 0;
+        const ticketType = parts.slice(2).join(' ');
 
-      const ign = interaction.fields.getTextInputValue('ign');
-      const serverName = interaction.fields.getTextInputValue('server');
-      const rawMap = interaction.fields.getTextInputValue('map_name').trim();
-      const description = interaction.fields.getTextInputValue('description');
+        const ign = interaction.fields.getTextInputValue('ign');
+        const serverName = interaction.fields.getTextInputValue('server');
+        const rawMap = interaction.fields.getTextInputValue('map_name').trim();
+        const description = interaction.fields.getTextInputValue('description');
 
-      // Room generation
-      const cleanMap = rawMap.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
-      const random4Digit = Math.floor(1000 + Math.random() * 9000);
-      const room = `/join ${cleanMap}-${random4Digit}`;
+        // Room generation
+        const cleanMap = rawMap.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
+        const random4Digit = Math.floor(1000 + Math.random() * 9000);
+        const room = `/join ${cleanMap}-${random4Digit}`;
 
-      // Increment requester stats
-      const currentReqs = userRequestCounts.get(interaction.user.id) || 0;
-      userRequestCounts.set(interaction.user.id, currentReqs + 1);
+        // Increment requester stats
+        const currentReqs = userRequestCounts.get(interaction.user.id) || 0;
+        userRequestCounts.set(interaction.user.id, currentReqs + 1);
 
-      const cfg = guildSettings.get(interaction.guild.id) || {};
-      const chName = `ticket-${ticketType}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
+        const cfg = guildSettings.get(interaction.guild.id) || {};
+        const chName = `ticket-${ticketType}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
 
-      const ticketChannel = await interaction.guild.channels.create({
-        name: chName,
-        type: ChannelType.GuildText,
-        parent: cfg.ticketCategory || null,
-        permissionOverwrites: [
-          { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-          { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
-        ]
-      });
+        const ticketChannel = await interaction.guild.channels.create({
+          name: chName,
+          type: ChannelType.GuildText,
+          parent: cfg.ticketCategory || null,
+          permissionOverwrites: [
+            { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+            { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+          ]
+        });
 
-      activeTickets.set(ticketChannel.id, {
-        requesterId: interaction.user.id,
-        type: ticketType,
-        ign,
-        server: serverName,
-        room,
-        description,
-        maxHelpers,
-        customPoints,
-        helpers: []
-      });
+        activeTickets.set(ticketChannel.id, {
+          requesterId: interaction.user.id,
+          type: ticketType,
+          ign,
+          server: serverName,
+          room,
+          description,
+          maxHelpers,
+          customPoints,
+          helpers: []
+        });
 
-      // Minimalist public embed
-      const embed = new EmbedBuilder()
-        .setTitle(`Ticket - ${ticketType}`)
-        .addFields(
-          { name: 'Requester:', value: `${interaction.user}`, inline: true },
-          { name: 'IGN:', value: `\`${ign}\``, inline: true },
-          { name: 'Server:', value: `\`${serverName}\``, inline: true },
-          { name: 'Details', value: description },
-          { name: `👥 Helpers (0/${maxHelpers})`, value: 'None' }
-        )
-        .setColor('#2b2d31')
-        .setTimestamp();
+        // Minimalist public embed
+        const embed = new EmbedBuilder()
+          .setTitle(`Ticket - ${ticketType}`)
+          .addFields(
+            { name: 'Requester:', value: `${interaction.user}`, inline: true },
+            { name: 'IGN:', value: `\`${ign}\``, inline: true },
+            { name: 'Server:', value: `\`${serverName}\``, inline: true },
+            { name: 'Details', value: description },
+            { name: `👥 Helpers (0/${maxHelpers})`, value: 'None' }
+          )
+          .setColor('#2b2d31')
+          .setTimestamp();
 
-      // Minimalist Single Row Action Buttons
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_location').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
-        new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept').setStyle(ButtonStyle.Success).setEmoji('✅'),
-        new ButtonBuilder().setCustomId('btn_leave').setLabel('Leave').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('btn_pinghelpers').setLabel('Ping').setStyle(ButtonStyle.Secondary).setEmoji('📢'),
-        new ButtonBuilder().setCustomId('btn_cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('btn_complete').setLabel('Complete').setStyle(ButtonStyle.Primary)
-      );
+        // Row 1: Active Actions (Max 5 buttons per row allowed by Discord API)
+        const row1 = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('btn_location').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
+          new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept').setStyle(ButtonStyle.Success).setEmoji('✅'),
+          new ButtonBuilder().setCustomId('btn_leave').setLabel('Leave').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('btn_pinghelpers').setLabel('Ping').setStyle(ButtonStyle.Secondary).setEmoji('📢')
+        );
 
-      const helperRolePing = HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper';
-      
-      const mainMsg = await ticketChannel.send({ 
-        content: `Hey ${interaction.user}! ${helperRolePing}`, 
-        embeds: [embed], 
-        components: [row] 
-      });
-      await mainMsg.pin().catch(() => {});
+        // Row 2: Ticket Controls
+        const row2 = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('btn_cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId('btn_complete').setLabel('Complete').setStyle(ButtonStyle.Primary)
+        );
 
-      return await interaction.editReply(`Created: ${ticketChannel}`);
+        const helperRolePing = HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper';
+        
+        const mainMsg = await ticketChannel.send({ 
+          content: `Hey ${interaction.user}! ${helperRolePing}`, 
+          embeds: [embed], 
+          components: [row1, row2] 
+        });
+        await mainMsg.pin().catch(() => {});
+
+        return await interaction.editReply(`✅ Ticket created: ${ticketChannel}`);
+      } catch (err) {
+        console.error('Failed to create ticket channel:', err);
+        return await interaction.editReply(`❌ Failed to create ticket channel: ${err.message}`);
+      }
     }
 
     // 3. TICKET ACTIONS
@@ -623,7 +632,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 // --- LOGIN ---
 client.login(process.env.DISCORD_TOKEN);
 
-// --- HTTP SERVER ---
+// --- HTTP SERVER FOR KEEP-ALIVE ---
 http.createServer((req, res) => {
   res.write("Bot is alive!");
   res.end();
