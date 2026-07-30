@@ -48,6 +48,21 @@ function parseButtonStyle(styleStr) {
   }
 }
 
+// Helper to calculate points based on ticket category/type
+function getPointsForTicketType(ticketType = '') {
+  const normalized = ticketType.toLowerCase();
+  if (normalized.includes('weekly') || normalized.includes('ultraweekly') || normalized.includes('ultra weeklies')) {
+    return 10;
+  }
+  if (normalized.includes('daily') || normalized.includes('ultradaily') || normalized.includes('ultra dailies')) {
+    return 5;
+  }
+  if (normalized.includes('farm') || normalized.includes('farming')) {
+    return 3;
+  }
+  return 1; // Default fallthrough
+}
+
 // Helper to update control panel embed
 async function updateTicketEmbed(channel, ticketData) {
   try {
@@ -93,7 +108,29 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('helpers-leaderboard')
-    .setDescription('View top ticket helpers and points')
+    .setDescription('View top ticket helpers and points'),
+
+  new SlashCommandBuilder()
+    .setName('points')
+    .setDescription('Manage helper points')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
+    .addSubcommand(sub =>
+      sub.setName('add')
+        .setDescription('Add points to a helper')
+        .addUserOption(opt => opt.setName('user').setDescription('Helper to give points').setRequired(true))
+        .addIntegerOption(opt => opt.setName('amount').setDescription('Amount of points').setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub.setName('remove')
+        .setDescription('Remove points from a helper')
+        .addUserOption(opt => opt.setName('user').setDescription('Helper to remove points from').setRequired(true))
+        .addIntegerOption(opt => opt.setName('amount').setDescription('Amount of points').setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub.setName('reset')
+        .setDescription('Reset helper points')
+        .addUserOption(opt => opt.setName('user').setDescription('User to reset (leave blank to reset ALL helpers)').setRequired(false))
+    )
 ];
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -114,6 +151,16 @@ async function registerCommands() {
 // --- BOT READY EVENT ---
 client.once(Events.ClientReady, async () => {
   console.log(`LoggedIn as ${client.user.tag}`);
+
+  // Set Status to DND and Activity to Competing
+  client.user.setPresence({
+    status: 'dnd',
+    activities: [{
+      name: 'AQW Helper Leaderboard',
+      type: 5 // 5 = Competing in
+    }]
+  });
+
   await registerCommands();
 });
 
@@ -230,7 +277,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       );
 
       const helperRolePing = HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper';
-      const mainMsg = await ticketChannel.send({ content: `${helperRolePing}`, embeds: [embed], components: [row1, row2] });
+      
+      // Ping both helper role and requester in channel
+      const mainMsg = await ticketChannel.send({ 
+        content: `Hey ${interaction.user}! ${helperRolePing}`, 
+        embeds: [embed], 
+        components: [row1, row2] 
+      });
       await mainMsg.pin().catch(() => {});
 
       await ticketChannel.send({
@@ -320,15 +373,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.channel.permissionOverwrites.edit(ticketData.requesterId, { SendMessages: false });
         }
 
-        // Reward points to active helpers
+        // Reward dynamic points based on ticket category (Weeklies: 10, Dailies: 5, Farm: 3, Default: 1)
         let awardedText = '';
         if (ticketData && ticketData.helpers.length > 0) {
+          const pointsToAward = getPointsForTicketType(ticketData.type);
+
           ticketData.helpers.forEach(hId => {
             const cur = helperPoints.get(hId) || 0;
-            helperPoints.set(hId, cur + 1);
+            helperPoints.set(hId, cur + pointsToAward);
           });
+
           const helperMentions = ticketData.helpers.map(id => `<@${id}>`).join(', ');
-          awardedText = `\n\n🏆 **+1 Helper Point** awarded to: ${helperMentions}`;
+          awardedText = `\n\n🏆 **+${pointsToAward} Helper Point(s)** awarded to: ${helperMentions}`;
         }
 
         const embed = new EmbedBuilder()
@@ -345,7 +401,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     // 4. SLASH COMMAND EXECUTION
     if (interaction.isChatInputCommand()) {
-      const { commandName, options } = interaction;
+      const { commandName, options, subcommand } = interaction;
 
       if (commandName === 'ticket-setup') {
         await interaction.deferReply({ ephemeral: true });
@@ -409,6 +465,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setTimestamp();
 
         return await interaction.reply({ embeds: [lbEmbed] });
+      }
+
+      if (commandName === 'points') {
+        const sub = options.getSubcommand();
+        const targetUser = options.getUser('user');
+
+        if (sub === 'add') {
+          const amount = options.getInteger('amount');
+          const current = helperPoints.get(targetUser.id) || 0;
+          const updated = current + amount;
+          helperPoints.set(targetUser.id, updated);
+          return await interaction.reply({ content: `✅ Added **${amount}** points to ${targetUser}. Total: **${updated}** pts.`, ephemeral: true });
+        }
+
+        if (sub === 'remove') {
+          const amount = options.getInteger('amount');
+          const current = helperPoints.get(targetUser.id) || 0;
+          const updated = Math.max(0, current - amount);
+          helperPoints.set(targetUser.id, updated);
+          return await interaction.reply({ content: `✅ Removed **${amount}** points from ${targetUser}. Total: **${updated}** pts.`, ephemeral: true });
+        }
+
+        if (sub === 'reset') {
+          if (targetUser) {
+            helperPoints.delete(targetUser.id);
+            return await interaction.reply({ content: `✅ Reset helper points for ${targetUser}.`, ephemeral: true });
+          } else {
+            helperPoints.clear();
+            return await interaction.reply({ content: '✅ Reset all helper points on the leaderboard!', ephemeral: true });
+          }
+        }
       }
     }
   } catch (error) {
