@@ -85,7 +85,7 @@ async function checkAndAssignHelperRoles(guild, userId, currentPoints) {
   }
 }
 
-// Helper to update control panel embed
+// Helper to update control panel embed (Map/Room intentionally excluded for privacy)
 async function updateTicketEmbed(channel, ticketData) {
   try {
     const pinnedMessages = await channel.messages.fetchPinned();
@@ -104,7 +104,6 @@ async function updateTicketEmbed(channel, ticketData) {
       { name: 'IGN:', value: `\`${ticketData.ign}\``, inline: true },
       { name: 'Server:', value: `\`${ticketData.server}\``, inline: true },
       { name: 'Bosses', value: ticketData.description },
-      { name: 'Description', value: `Map/Room: \`${ticketData.room}\`` },
       { name: `👥 Helpers (${ticketData.helpers.length}/${maxLimit})`, value: helpersList }
     );
 
@@ -242,12 +241,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setStyle(TextInputStyle.Short)
         .setRequired(true);
 
-      const roomInput = new TextInputBuilder()
-        .setCustomId('room')
-        .setLabel('Map & Room Number (Optional for random)')
-        .setPlaceholder('Leave blank for random room (e.g., /join map-9482)')
+      const mapInput = new TextInputBuilder()
+        .setCustomId('map_name')
+        .setLabel('Map Name')
+        .setPlaceholder('e.g., ultraezrajal, ultrawarden, timeinn')
         .setStyle(TextInputStyle.Short)
-        .setRequired(false); // Made optional for random room generation
+        .setRequired(true);
 
       const descInput = new TextInputBuilder()
         .setCustomId('description')
@@ -259,7 +258,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       modal.addComponents(
         new ActionRowBuilder().addComponents(ignInput),
         new ActionRowBuilder().addComponents(serverInput),
-        new ActionRowBuilder().addComponents(roomInput),
+        new ActionRowBuilder().addComponents(mapInput),
         new ActionRowBuilder().addComponents(descInput)
       );
 
@@ -277,15 +276,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const ign = interaction.fields.getTextInputValue('ign');
       const serverName = interaction.fields.getTextInputValue('server');
-      let room = interaction.fields.getTextInputValue('room');
+      const rawMap = interaction.fields.getTextInputValue('map_name').trim();
       const description = interaction.fields.getTextInputValue('description');
 
-      // Random Room Number generator if user leaves room field empty
-      if (!room || room.trim() === '') {
-        const random4Digit = Math.floor(1000 + Math.random() * 9000);
-        const mapClean = ticketType.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
-        room = `/join ${mapClean}-${random4Digit}`;
-      }
+      // Clean up map name and append a random 4-digit room number
+      const cleanMap = rawMap.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
+      const random4Digit = Math.floor(1000 + Math.random() * 9000);
+      const room = `/join ${cleanMap}-${random4Digit}`;
 
       const cfg = guildSettings.get(interaction.guild.id) || {};
       const chName = `ticket-${ticketType}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
@@ -312,6 +309,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         helpers: []
       });
 
+      // Embed NO LONGER includes Map/Room details directly
       const embed = new EmbedBuilder()
         .setTitle(`Ticket - ${ticketType}`)
         .addFields(
@@ -319,7 +317,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           { name: 'IGN:', value: `\`${ign}\``, inline: true },
           { name: 'Server:', value: `\`${serverName}\``, inline: true },
           { name: 'Bosses', value: description },
-          { name: 'Description', value: `Map/Room: \`${room}\`` },
           { name: `👥 Helpers (0/${maxHelpers})`, value: 'None yet' }
         )
         .setColor('#3b82f6')
@@ -375,7 +372,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         if (customId === 'btn_showroom') {
           return interaction.reply({
-            content: `📍 **Room Details:**\n**Server:** \`${ticketData.server}\`\n**Map/Room:** \`${ticketData.room}\``,
+            content: `📍 **Room Details (Private):**\n**Server:** \`${ticketData.server}\`\n**Map/Room:** \`${ticketData.room}\``,
             ephemeral: true
           });
         }
@@ -404,7 +401,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
         activeTickets.set(interaction.channel.id, ticketData);
 
         const spotsLeft = maxAllowed - ticketData.helpers.length;
-        await interaction.reply({ content: `✅ **${interaction.user}** accepted the request! **${spotsLeft}** spot(s) remaining. You can now use **View Location**!` });
+
+        // Public announcement in the channel (without exposing room)
+        await interaction.channel.send({
+          content: `✅ **${interaction.user}** accepted the request! **${spotsLeft}** spot(s) remaining.`
+        });
+
+        // Ephemeral reply only to the helper with room info!
+        await interaction.reply({
+          content: `✅ **Request Accepted!** Here are the private room details:\n📍 **Server:** \`${ticketData.server}\`\n📍 **Map/Room:** \`${ticketData.room}\``,
+          ephemeral: true
+        });
 
         return updateTicketEmbed(interaction.channel, ticketData);
       }
@@ -440,6 +447,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       if (customId === 'btn_complete') {
+        // Restrict complete action to requester or staff members
+        if (ticketData && interaction.user.id !== ticketData.requesterId && !interaction.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
+          return interaction.reply({
+            content: '❌ Only the ticket requester or staff members can finish and pay out this request.',
+            ephemeral: true
+          });
+        }
+
         await interaction.deferReply();
 
         await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
