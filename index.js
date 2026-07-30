@@ -93,6 +93,8 @@ async function updateTicketEmbed(channel, ticketData) {
       ? ticketData.helpers.map(id => `<@${id}>`).join('\n')
       : 'None yet';
 
+    const maxLimit = ticketData.maxHelpers || 6;
+
     const oldEmbed = panelMsg.embeds[0];
     const newEmbed = EmbedBuilder.from(oldEmbed).setFields(
       { name: 'Requester:', value: `<@${ticketData.requesterId}>`, inline: true },
@@ -100,7 +102,7 @@ async function updateTicketEmbed(channel, ticketData) {
       { name: 'Server:', value: `\`${ticketData.server}\``, inline: true },
       { name: 'Bosses', value: ticketData.description },
       { name: 'Description', value: `Map/Room: \`${ticketData.room}\`` },
-      { name: `👥 Helpers (${ticketData.helpers.length}/6)`, value: helpersList }
+      { name: `👥 Helpers (${ticketData.helpers.length}/${maxLimit})`, value: helpersList }
     );
 
     await panelMsg.edit({ embeds: [newEmbed] });
@@ -123,6 +125,7 @@ const commands = [
     .addStringOption(opt => opt.setName('btn2_label').setDescription('Button 2 Label (optional)').setRequired(false))
     .addStringOption(opt => opt.setName('btn2_emoji').setDescription('Button 2 Emoji (optional)').setRequired(false))
     .addStringOption(opt => opt.setName('btn2_style').setDescription('Button 2 Style (optional)').setRequired(false))
+    .addIntegerOption(opt => opt.setName('max_helpers').setDescription('Max helpers allowed for this panel (1-6, Default: 6)').setMinValue(1).setMaxValue(6).setRequired(false))
     .addChannelOption(opt => opt.setName('category').setDescription('Category channel to place new tickets in').setRequired(false)),
 
   new SlashCommandBuilder()
@@ -189,7 +192,7 @@ client.once(Events.ClientReady, async () => {
   client.user.setPresence({
     status: 'dnd',
     activities: [{
-      name: 'AQW Helper Leaderboard',
+      name: 'Please',
       type: 5 // Competing in
     }]
   });
@@ -204,10 +207,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     // 1. TICKET PANEL BUTTON CLICK -> MODAL FORM
     if (interaction.isButton() && interaction.customId.startsWith('tselect_')) {
-      const categoryName = interaction.customId.replace('tselect_', '').replace(/_/g, ' ');
+      const parts = interaction.customId.split('_');
+      const maxHelpers = parts[parts.length - 1]; // Parse custom max helpers limit from button ID
+      const categoryName = parts.slice(1, -1).join(' ');
 
       const modal = new ModalBuilder()
-        .setCustomId(`ticket_form_${interaction.customId.replace('tselect_', '')}`)
+        .setCustomId(`ticket_form_${maxHelpers}_${categoryName.replace(/\s+/g, '_')}`)
         .setTitle(`Setup Ticket: ${categoryName}`);
 
       const ignInput = new TextInputBuilder()
@@ -252,7 +257,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_form_')) {
       await interaction.deferReply({ ephemeral: true });
 
-      const ticketType = interaction.customId.replace('ticket_form_', '').replace(/_/g, ' ');
+      const raw = interaction.customId.replace('ticket_form_', '');
+      const firstUnderscore = raw.indexOf('_');
+      const maxHelpers = parseInt(raw.substring(0, firstUnderscore)) || 6;
+      const ticketType = raw.substring(firstUnderscore + 1).replace(/_/g, ' ');
+
       const ign = interaction.fields.getTextInputValue('ign');
       const serverName = interaction.fields.getTextInputValue('server');
       const room = interaction.fields.getTextInputValue('room');
@@ -278,6 +287,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         server: serverName,
         room,
         description,
+        maxHelpers,
         helpers: []
       });
 
@@ -289,12 +299,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
           { name: 'Server:', value: `\`${serverName}\``, inline: true },
           { name: 'Bosses', value: description },
           { name: 'Description', value: `Map/Room: \`${room}\`` },
-          { name: '👥 Helpers (0/6)', value: 'None yet' }
+          { name: `👥 Helpers (0/${maxHelpers})`, value: 'None yet' }
         )
         .setColor('#3b82f6')
         .setTimestamp();
 
-      // Updated & Rephrased Control Buttons
       const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('btn_showroom').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
         new ButtonBuilder().setCustomId('btn_info').setLabel('!').setStyle(ButtonStyle.Secondary),
@@ -329,7 +338,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const ticketData = activeTickets.get(interaction.channel.id);
       const customId = interaction.customId;
 
-      // Restrict info viewing to Requester, Claimed Helpers, or Admins
       if (customId === 'btn_showroom' || customId === 'btn_info') {
         if (!ticketData) return interaction.reply({ content: '❌ Ticket details not found.', ephemeral: true });
 
@@ -366,14 +374,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return interaction.reply({ content: '⚠️ You have already accepted this request!', ephemeral: true });
         }
 
-        if (ticketData.helpers.length >= 6) {
-          return interaction.reply({ content: '⚠️ Helper spots are full (6/6)!', ephemeral: true });
+        const maxAllowed = ticketData.maxHelpers || 6;
+        if (ticketData.helpers.length >= maxAllowed) {
+          return interaction.reply({ content: `⚠️ Helper spots are full (${maxAllowed}/${maxAllowed})!`, ephemeral: true });
         }
 
         ticketData.helpers.push(interaction.user.id);
         activeTickets.set(interaction.channel.id, ticketData);
 
-        const spotsLeft = 6 - ticketData.helpers.length;
+        const spotsLeft = maxAllowed - ticketData.helpers.length;
         await interaction.reply({ content: `✅ **${interaction.user}** accepted the request! **${spotsLeft}** spot(s) remaining. You can now use **View Location**!` });
 
         return updateTicketEmbed(interaction.channel, ticketData);
@@ -412,13 +421,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (customId === 'btn_complete') {
         await interaction.deferReply();
 
-        // Lock channel chat permissions
         await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
         if (ticketData) {
           await interaction.channel.permissionOverwrites.edit(ticketData.requesterId, { SendMessages: false });
         }
 
-        // Automatic point distribution & Auto-Role checking
         let awardedText = '';
         if (ticketData && ticketData.helpers.length > 0) {
           const pointsToAward = getPointsForTicketType(ticketData.type);
@@ -428,7 +435,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const updated = current + pointsToAward;
             helperPoints.set(hId, updated);
 
-            // Trigger auto-role evaluation
             await checkAndAssignHelperRoles(interaction.guild, hId, updated);
           }
 
@@ -460,6 +466,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const title = options.getString('title');
         const desc = options.getString('description').replace(/\\n/g, '\n');
         const category = options.getChannel('category');
+        const maxHelpers = options.getInteger('max_helpers') || 6;
 
         if (category) {
           const cfg = guildSettings.get(interaction.guild.id) || {};
@@ -479,7 +486,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const b1Emoji = options.getString('btn1_emoji');
         const b1Style = options.getString('btn1_style');
         const btn1 = new ButtonBuilder()
-          .setCustomId(`tselect_${b1Label.toLowerCase().replace(/\s+/g, '_')}`)
+          .setCustomId(`tselect_${b1Label.toLowerCase().replace(/\s+/g, '_')}_${maxHelpers}`)
           .setLabel(b1Label)
           .setStyle(parseButtonStyle(b1Style));
         if (b1Emoji) btn1.setEmoji(b1Emoji);
@@ -490,7 +497,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const b2Emoji = options.getString('btn2_emoji');
           const b2Style = options.getString('btn2_style');
           const btn2 = new ButtonBuilder()
-            .setCustomId(`tselect_${b2Label.toLowerCase().replace(/\s+/g, '_')}`)
+            .setCustomId(`tselect_${b2Label.toLowerCase().replace(/\s+/g, '_')}_${maxHelpers}`)
             .setLabel(b2Label)
             .setStyle(parseButtonStyle(b2Style));
           if (b2Emoji) btn2.setEmoji(b2Emoji);
@@ -498,7 +505,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         await channel.send({ embeds: [embed], components: [row] });
-        return await interaction.editReply('✅ Ticket panel posted!');
+        return await interaction.editReply(`✅ Ticket panel posted with max helper capacity set to **${maxHelpers}**!`);
       }
 
       if (commandName === 'helpers-leaderboard') {
