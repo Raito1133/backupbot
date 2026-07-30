@@ -49,9 +49,12 @@ function parseButtonStyle(styleStr) {
   }
 }
 
-// Helper to calculate points based on ticket category/type
-function getPointsForTicketType(ticketType = '') {
-  const normalized = ticketType.toLowerCase();
+// Helper to calculate points based on custom value or fallback category/type
+function getPointsForTicket(ticketData) {
+  if (ticketData.customPoints && ticketData.customPoints > 0) {
+    return ticketData.customPoints;
+  }
+  const normalized = (ticketData.type || '').toLowerCase();
   if (normalized.includes('weekly') || normalized.includes('ultraweekly') || normalized.includes('ultra weeklies')) {
     return 10;
   }
@@ -119,14 +122,21 @@ const commands = [
     .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post the panel in').setRequired(true))
     .addStringOption(opt => opt.setName('title').setDescription('Embed title').setRequired(true))
     .addStringOption(opt => opt.setName('description').setDescription('Embed description (use \\n for line breaks)').setRequired(true))
+    
+    // Button 1 Options
     .addStringOption(opt => opt.setName('btn1_label').setDescription('Button 1 Label').setRequired(true))
     .addStringOption(opt => opt.setName('btn1_emoji').setDescription('Button 1 Emoji (optional)').setRequired(false))
     .addStringOption(opt => opt.setName('btn1_style').setDescription('Button 1 Style: Green, Red, Blue, Grey').setRequired(false))
     .addIntegerOption(opt => opt.setName('btn1_max').setDescription('Button 1 Helper Limit (1-6, Default: 6)').setMinValue(1).setMaxValue(6).setRequired(false))
+    .addIntegerOption(opt => opt.setName('btn1_points').setDescription('Points to award for Button 1 (optional)').setMinValue(1).setRequired(false))
+
+    // Button 2 Options
     .addStringOption(opt => opt.setName('btn2_label').setDescription('Button 2 Label (optional)').setRequired(false))
     .addStringOption(opt => opt.setName('btn2_emoji').setDescription('Button 2 Emoji (optional)').setRequired(false))
     .addStringOption(opt => opt.setName('btn2_style').setDescription('Button 2 Style (optional)').setRequired(false))
     .addIntegerOption(opt => opt.setName('btn2_max').setDescription('Button 2 Helper Limit (1-6, Default: 6)').setMinValue(1).setMaxValue(6).setRequired(false))
+    .addIntegerOption(opt => opt.setName('btn2_points').setDescription('Points to award for Button 2 (optional)').setMinValue(1).setRequired(false))
+
     .addChannelOption(opt => opt.setName('category').setDescription('Category channel to place new tickets in').setRequired(false)),
 
   new SlashCommandBuilder()
@@ -209,11 +219,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // 1. TICKET PANEL BUTTON CLICK -> MODAL FORM
     if (interaction.isButton() && interaction.customId.startsWith('tselect_')) {
       const parts = interaction.customId.split('_');
-      const maxHelpers = parts[parts.length - 1]; // Get max helpers from button customId
-      const categoryName = parts.slice(1, -1).join(' ');
+      // Format: tselect_[category]_[maxHelpers]_[customPoints]
+      const customPoints = parts[parts.length - 1];
+      const maxHelpers = parts[parts.length - 2];
+      const categoryName = parts.slice(1, -2).join(' ');
 
       const modal = new ModalBuilder()
-        .setCustomId(`ticket_form_${maxHelpers}_${categoryName.replace(/\s+/g, '_')}`)
+        .setCustomId(`ticket_form_${maxHelpers}_${customPoints}_${categoryName.replace(/\s+/g, '_')}`)
         .setTitle(`Setup Ticket: ${categoryName}`);
 
       const ignInput = new TextInputBuilder()
@@ -232,10 +244,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const roomInput = new TextInputBuilder()
         .setCustomId('room')
-        .setLabel('Map & Room Number')
-        .setPlaceholder('e.g., /join ultraezrajal-9999')
+        .setLabel('Map & Room Number (Optional for random)')
+        .setPlaceholder('Leave blank for random room (e.g., /join map-9482)')
         .setStyle(TextInputStyle.Short)
-        .setRequired(true);
+        .setRequired(false); // Made optional for random room generation
 
       const descInput = new TextInputBuilder()
         .setCustomId('description')
@@ -258,15 +270,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_form_')) {
       await interaction.deferReply({ ephemeral: true });
 
-      const raw = interaction.customId.replace('ticket_form_', '');
-      const firstUnderscore = raw.indexOf('_');
-      const maxHelpers = parseInt(raw.substring(0, firstUnderscore)) || 6;
-      const ticketType = raw.substring(firstUnderscore + 1).replace(/_/g, ' ');
+      const parts = interaction.customId.replace('ticket_form_', '').split('_');
+      const maxHelpers = parseInt(parts[0]) || 6;
+      const customPoints = parseInt(parts[1]) || 0;
+      const ticketType = parts.slice(2).join(' ');
 
       const ign = interaction.fields.getTextInputValue('ign');
       const serverName = interaction.fields.getTextInputValue('server');
-      const room = interaction.fields.getTextInputValue('room');
+      let room = interaction.fields.getTextInputValue('room');
       const description = interaction.fields.getTextInputValue('description');
+
+      // Random Room Number generator if user leaves room field empty
+      if (!room || room.trim() === '') {
+        const random4Digit = Math.floor(1000 + Math.random() * 9000);
+        const mapClean = ticketType.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
+        room = `/join ${mapClean}-${random4Digit}`;
+      }
 
       const cfg = guildSettings.get(interaction.guild.id) || {};
       const chName = `ticket-${ticketType}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
@@ -289,6 +308,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         room,
         description,
         maxHelpers,
+        customPoints,
         helpers: []
       });
 
@@ -429,7 +449,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         let awardedText = '';
         if (ticketData && ticketData.helpers.length > 0) {
-          const pointsToAward = getPointsForTicketType(ticketData.type);
+          const pointsToAward = getPointsForTicket(ticketData);
 
           for (const hId of ticketData.helpers) {
             const current = helperPoints.get(hId) || 0;
@@ -482,28 +502,30 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const row = new ActionRowBuilder();
 
-        // Button 1 logic & limit
+        // Button 1 logic
         const b1Label = options.getString('btn1_label');
         const b1Emoji = options.getString('btn1_emoji');
         const b1Style = options.getString('btn1_style');
         const b1Max = options.getInteger('btn1_max') || 6;
+        const b1Points = options.getInteger('btn1_points') || 0;
 
         const btn1 = new ButtonBuilder()
-          .setCustomId(`tselect_${b1Label.toLowerCase().replace(/\s+/g, '_')}_${b1Max}`)
+          .setCustomId(`tselect_${b1Label.toLowerCase().replace(/\s+/g, '_')}_${b1Max}_${b1Points}`)
           .setLabel(b1Label)
           .setStyle(parseButtonStyle(b1Style));
         if (b1Emoji) btn1.setEmoji(b1Emoji);
         row.addComponents(btn1);
 
-        // Button 2 logic & limit
+        // Button 2 logic
         const b2Label = options.getString('btn2_label');
         if (b2Label) {
           const b2Emoji = options.getString('btn2_emoji');
           const b2Style = options.getString('btn2_style');
           const b2Max = options.getInteger('btn2_max') || 6;
+          const b2Points = options.getInteger('btn2_points') || 0;
 
           const btn2 = new ButtonBuilder()
-            .setCustomId(`tselect_${b2Label.toLowerCase().replace(/\s+/g, '_')}_${b2Max}`)
+            .setCustomId(`tselect_${b2Label.toLowerCase().replace(/\s+/g, '_')}_${b2Max}_${b2Points}`)
             .setLabel(b2Label)
             .setStyle(parseButtonStyle(b2Style));
           if (b2Emoji) btn2.setEmoji(b2Emoji);
