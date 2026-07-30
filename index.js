@@ -36,6 +36,7 @@ const client = new Client({
 const activeTickets = new Map();
 const helperPoints = new Map();
 const guildSettings = new Map();
+const roleRewards = new Map(); // Points -> RoleID mapping
 
 // Helper to parse button style strings
 function parseButtonStyle(styleStr) {
@@ -60,7 +61,25 @@ function getPointsForTicketType(ticketType = '') {
   if (normalized.includes('farm') || normalized.includes('farming')) {
     return 3;
   }
-  return 1; // Default fallthrough
+  return 1; // Default
+}
+
+// Helper function to check & assign auto-roles when points are updated
+async function checkAndAssignHelperRoles(guild, userId, currentPoints) {
+  try {
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) return;
+
+    for (const [requiredPts, roleId] of roleRewards.entries()) {
+      if (currentPoints >= requiredPts) {
+        if (!member.roles.cache.has(roleId)) {
+          await member.roles.add(roleId).catch(console.error);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to assign helper auto-role:', err);
+  }
 }
 
 // Helper to update control panel embed
@@ -130,6 +149,21 @@ const commands = [
       sub.setName('reset')
         .setDescription('Reset helper points')
         .addUserOption(opt => opt.setName('user').setDescription('User to reset (leave blank to reset ALL helpers)').setRequired(false))
+    ),
+
+  new SlashCommandBuilder()
+    .setName('helper-roles')
+    .setDescription('Configure automatic role rewards for helper points')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
+    .addSubcommand(sub =>
+      sub.setName('add')
+        .setDescription('Set a role reward for achieving a point milestone')
+        .addIntegerOption(opt => opt.setName('points').setDescription('Points required').setRequired(true))
+        .addRoleOption(opt => opt.setName('role').setDescription('Role to award').setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub.setName('list')
+        .setDescription('View active point-to-role rewards')
     )
 ];
 
@@ -152,24 +186,23 @@ async function registerCommands() {
 client.once(Events.ClientReady, async () => {
   console.log(`LoggedIn as ${client.user.tag}`);
 
-  // Set Status to DND and Activity to Competing
   client.user.setPresence({
     status: 'dnd',
     activities: [{
       name: 'AQW Helper Leaderboard',
-      type: 5 // 5 = Competing in
+      type: 5 // Competing in
     }]
   });
 
   await registerCommands();
 });
 
-// --- INTERACTION HANDLER WITH SAFE ERROR CATCHING ---
+// --- INTERACTION HANDLER ---
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.guild || interaction.guild.id !== GUILD_ID) return;
 
   try {
-    // 1. TICKET PANEL BUTTON CLICK -> SHOW MODAL FORM
+    // 1. TICKET PANEL BUTTON CLICK -> MODAL FORM
     if (interaction.isButton() && interaction.customId.startsWith('tselect_')) {
       const categoryName = interaction.customId.replace('tselect_', '').replace(/_/g, ' ');
 
@@ -215,7 +248,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return await interaction.showModal(modal);
     }
 
-    // 2. MODAL SUBMIT -> CREATE TICKET CHANNEL & ACTION PANEL
+    // 2. MODAL SUBMIT -> CREATE TICKET CHANNEL
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_form_')) {
       await interaction.deferReply({ ephemeral: true });
 
@@ -238,7 +271,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         ]
       });
 
-      // Save active ticket session
       activeTickets.set(ticketChannel.id, {
         requesterId: interaction.user.id,
         type: ticketType,
@@ -262,23 +294,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setColor('#3b82f6')
         .setTimestamp();
 
-      // Control buttons row
+      // Updated & Rephrased Control Buttons
       const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_showroom').setLabel('Show Room').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
+        new ButtonBuilder().setCustomId('btn_showroom').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
         new ButtonBuilder().setCustomId('btn_info').setLabel('!').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('btn_claim').setLabel('Claim & Join').setStyle(ButtonStyle.Success).setEmoji('✅'),
-        new ButtonBuilder().setCustomId('btn_leave').setLabel('Leave Ticket').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
-        new ButtonBuilder().setCustomId('btn_pinghelpers').setLabel('Ping Helpers').setStyle(ButtonStyle.Secondary).setEmoji('📢')
+        new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept Request').setStyle(ButtonStyle.Success).setEmoji('✅'),
+        new ButtonBuilder().setCustomId('btn_leave').setLabel('Step Down').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
+        new ButtonBuilder().setCustomId('btn_pinghelpers').setLabel('Call Squad').setStyle(ButtonStyle.Secondary).setEmoji('📢')
       );
 
       const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger).setEmoji('❌'),
-        new ButtonBuilder().setCustomId('btn_complete').setLabel('Complete Ticket').setStyle(ButtonStyle.Primary).setEmoji('✅')
+        new ButtonBuilder().setCustomId('btn_cancel').setLabel('Close Request').setStyle(ButtonStyle.Danger).setEmoji('❌'),
+        new ButtonBuilder().setCustomId('btn_complete').setLabel('Finish & Pay Out').setStyle(ButtonStyle.Primary).setEmoji('✅')
       );
 
       const helperRolePing = HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper';
       
-      // Ping both helper role and requester in channel
       const mainMsg = await ticketChannel.send({ 
         content: `Hey ${interaction.user}! ${helperRolePing}`, 
         embeds: [embed], 
@@ -287,7 +318,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await mainMsg.pin().catch(() => {});
 
       await ticketChannel.send({
-        content: `📌 **${interaction.user}** - After this ticket is over, please send a screenshot of helpers or mention their names so they can be rewarded!`
+        content: `📌 **${interaction.user}** - Once finished, click **Finish & Pay Out** to resolve this ticket and automatically award helper points!`
       });
 
       return await interaction.editReply(`Ticket created: ${ticketChannel}`);
@@ -298,27 +329,41 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const ticketData = activeTickets.get(interaction.channel.id);
       const customId = interaction.customId;
 
-      if (customId === 'btn_showroom') {
+      // Restrict info viewing to Requester, Claimed Helpers, or Admins
+      if (customId === 'btn_showroom' || customId === 'btn_info') {
         if (!ticketData) return interaction.reply({ content: '❌ Ticket details not found.', ephemeral: true });
-        return interaction.reply({
-          content: `📍 **Room Details:**\n**Server:** \`${ticketData.server}\`\n**Map/Room:** \`${ticketData.room}\``,
-          ephemeral: true
-        });
-      }
 
-      if (customId === 'btn_info') {
-        if (!ticketData) return interaction.reply({ content: '❌ Ticket details not found.', ephemeral: true });
-        return interaction.reply({
-          content: `ℹ️ **IGN:** \`${ticketData.ign}\`\n**Details:** ${ticketData.description}`,
-          ephemeral: true
-        });
+        const isRequester = interaction.user.id === ticketData.requesterId;
+        const isHelper = ticketData.helpers.includes(interaction.user.id);
+        const isAdmin = interaction.member.permissions.has(PermissionsBitField.Flags.ManageChannels);
+
+        if (!isRequester && !isHelper && !isAdmin) {
+          return interaction.reply({
+            content: '🔒 **Access Denied:** You must click **Accept Request** first to view the room and player details.',
+            ephemeral: true
+          });
+        }
+
+        if (customId === 'btn_showroom') {
+          return interaction.reply({
+            content: `📍 **Room Details:**\n**Server:** \`${ticketData.server}\`\n**Map/Room:** \`${ticketData.room}\``,
+            ephemeral: true
+          });
+        }
+
+        if (customId === 'btn_info') {
+          return interaction.reply({
+            content: `ℹ️ **IGN:** \`${ticketData.ign}\`\n**Details:** ${ticketData.description}`,
+            ephemeral: true
+          });
+        }
       }
 
       if (customId === 'btn_claim') {
         if (!ticketData) return interaction.reply({ content: '❌ Ticket details not found.', ephemeral: true });
 
         if (ticketData.helpers.includes(interaction.user.id)) {
-          return interaction.reply({ content: '⚠️ You are already listed as a helper!', ephemeral: true });
+          return interaction.reply({ content: '⚠️ You have already accepted this request!', ephemeral: true });
         }
 
         if (ticketData.helpers.length >= 6) {
@@ -329,7 +374,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         activeTickets.set(interaction.channel.id, ticketData);
 
         const spotsLeft = 6 - ticketData.helpers.length;
-        await interaction.reply({ content: `✅ **${interaction.user}** claimed this ticket! **${spotsLeft}** spot(s) left!` });
+        await interaction.reply({ content: `✅ **${interaction.user}** accepted the request! **${spotsLeft}** spot(s) remaining. You can now use **View Location**!` });
 
         return updateTicketEmbed(interaction.channel, ticketData);
       }
@@ -344,21 +389,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
         ticketData.helpers = ticketData.helpers.filter(id => id !== interaction.user.id);
         activeTickets.set(interaction.channel.id, ticketData);
 
-        await interaction.reply({ content: `🚪 **${interaction.user}** left the helper list.` });
+        await interaction.reply({ content: `🚪 **${interaction.user}** stepped down from this ticket.` });
         return updateTicketEmbed(interaction.channel, ticketData);
       }
 
       if (customId === 'btn_pinghelpers') {
         const helperRolePing = HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper';
-        return interaction.reply({ content: `📢 ${helperRolePing} — Assistance requested in this ticket!` });
+        return interaction.reply({ content: `📢 ${helperRolePing} — Squad assistance requested in this ticket!` });
       }
 
       if (customId === 'btn_cancel') {
         if (ticketData && interaction.user.id !== ticketData.requesterId && !interaction.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-          return interaction.reply({ content: '❌ Only the requester or staff can cancel this ticket.', ephemeral: true });
+          return interaction.reply({ content: '❌ Only the requester or staff can close this request.', ephemeral: true });
         }
 
-        await interaction.reply('❌ Ticket cancelled. Deleting channel in 3 seconds...');
+        await interaction.reply('❌ Request closed. Deleting channel in 3 seconds...');
         activeTickets.delete(interaction.channel.id);
         setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
         return;
@@ -367,29 +412,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (customId === 'btn_complete') {
         await interaction.deferReply();
 
-        // Disable chat permissions for channel
+        // Lock channel chat permissions
         await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
         if (ticketData) {
           await interaction.channel.permissionOverwrites.edit(ticketData.requesterId, { SendMessages: false });
         }
 
-        // Reward dynamic points based on ticket category (Weeklies: 10, Dailies: 5, Farm: 3, Default: 1)
+        // Automatic point distribution & Auto-Role checking
         let awardedText = '';
         if (ticketData && ticketData.helpers.length > 0) {
           const pointsToAward = getPointsForTicketType(ticketData.type);
 
-          ticketData.helpers.forEach(hId => {
-            const cur = helperPoints.get(hId) || 0;
-            helperPoints.set(hId, cur + pointsToAward);
-          });
+          for (const hId of ticketData.helpers) {
+            const current = helperPoints.get(hId) || 0;
+            const updated = current + pointsToAward;
+            helperPoints.set(hId, updated);
+
+            // Trigger auto-role evaluation
+            await checkAndAssignHelperRoles(interaction.guild, hId, updated);
+          }
 
           const helperMentions = ticketData.helpers.map(id => `<@${id}>`).join(', ');
-          awardedText = `\n\n🏆 **+${pointsToAward} Helper Point(s)** awarded to: ${helperMentions}`;
+          awardedText = `\n\n🏆 **+${pointsToAward} Helper Point(s)** automatically awarded to: ${helperMentions}`;
+        } else {
+          awardedText = '\n\n⚠️ No helpers accepted this request, so no points were awarded.';
         }
 
         const embed = new EmbedBuilder()
-          .setTitle('🔒 Ticket Completed')
-          .setDescription(`This ticket has been marked as complete! Chat is now disabled.${awardedText}`)
+          .setTitle('🔒 Ticket Resolved')
+          .setDescription(`This request has been finished and closed!${awardedText}`)
           .setColor('#2ecc71')
           .setTimestamp();
 
@@ -401,7 +452,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     // 4. SLASH COMMAND EXECUTION
     if (interaction.isChatInputCommand()) {
-      const { commandName, options, subcommand } = interaction;
+      const { commandName, options } = interaction;
 
       if (commandName === 'ticket-setup') {
         await interaction.deferReply({ ephemeral: true });
@@ -476,6 +527,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const current = helperPoints.get(targetUser.id) || 0;
           const updated = current + amount;
           helperPoints.set(targetUser.id, updated);
+
+          await checkAndAssignHelperRoles(interaction.guild, targetUser.id, updated);
           return await interaction.reply({ content: `✅ Added **${amount}** points to ${targetUser}. Total: **${updated}** pts.`, ephemeral: true });
         }
 
@@ -495,6 +548,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
             helperPoints.clear();
             return await interaction.reply({ content: '✅ Reset all helper points on the leaderboard!', ephemeral: true });
           }
+        }
+      }
+
+      if (commandName === 'helper-roles') {
+        const sub = options.getSubcommand();
+
+        if (sub === 'add') {
+          const requiredPts = options.getInteger('points');
+          const role = options.getRole('role');
+
+          roleRewards.set(requiredPts, role.id);
+          return await interaction.reply({
+            content: `✅ Added auto-role reward! Reach **${requiredPts} points** to automatically earn the ${role} role.`,
+            ephemeral: true
+          });
+        }
+
+        if (sub === 'list') {
+          if (roleRewards.size === 0) {
+            return await interaction.reply({ content: '⚙️ No point-based role rewards configured yet.', ephemeral: true });
+          }
+
+          const sorted = [...roleRewards.entries()].sort((a, b) => a[0] - b[0]);
+          const rewardList = sorted.map(([pts, roleId]) => `• **${pts} Points** $\\rightarrow$ <@&${roleId}>`).join('\n');
+
+          const embed = new EmbedBuilder()
+            .setTitle('🏅 Helper Role Rewards')
+            .setDescription(rewardList)
+            .setColor('#3498db');
+
+          return await interaction.reply({ embeds: [embed], ephemeral: true });
         }
       }
     }
