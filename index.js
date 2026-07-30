@@ -104,7 +104,6 @@ async function updateTicketEmbed(channel, ticketData) {
 }
 
 // --- SLASH COMMAND DEFINITIONS ---
-// 4 options x 5 buttons = 20 + 3 base options = 23 total options (Safely under 25 limit)
 const setupCommand = new SlashCommandBuilder()
   .setName('ticket-setup')
   .setDescription('Post the interactive ticket setup panel')
