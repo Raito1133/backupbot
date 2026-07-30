@@ -22,6 +22,12 @@ const http = require('http');
 const GUILD_ID = '1371775026264670228'; // Server ID
 const HELPER_ROLE_ID = 'YOUR_HELPER_ROLE_ID'; // Replace with your @Ultra Helper Role ID
 
+// Ensure DISCORD_TOKEN is set before starting
+if (!process.env.DISCORD_TOKEN) {
+  console.error('❌ FATAL ERROR: DISCORD_TOKEN environment variable is not defined.');
+  process.exit(1);
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -206,18 +212,22 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 async function registerCommands() {
   try {
+    if (!client.user) {
+      throw new Error('Client user is not available yet.');
+    }
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
     );
+    console.log('✅ Guild slash commands registered successfully!');
   } catch (error) {
-    console.error('Error registering commands:', error);
+    console.error('❌ Error registering commands:', error);
   }
 }
 
 // --- BOT READY ---
 client.once(Events.ClientReady, async () => {
-  console.log(`LoggedIn as ${client.user.tag}`);
+  console.log(`✅ Logged in as ${client.user.tag}`);
 
   client.user.setPresence({
     status: 'dnd',
@@ -625,7 +635,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
 
           const sorted = [...roleRewards.entries()].sort((a, b) => a[0] - b[0]);
-          const rewardList = sorted.map(([pts, roleId]) => `• **${pts} Pts** $\\rightarrow$ <@&${roleId}>`).join('\n');
+          const rewardList = sorted.map(([pts, roleId]) => `• **${pts} Pts** -> <@&${roleId}>`).join('\n');
 
           const embed = new EmbedBuilder()
             .setTitle('🏅 Role Rewards')
@@ -637,15 +647,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Error during interaction handling:', error);
   }
 });
 
-// --- LOGIN ---
-client.login(process.env.DISCORD_TOKEN);
-
 // --- HTTP SERVER FOR KEEP-ALIVE ---
+const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.write("Bot is alive!");
   res.end();
-}).listen(process.env.PORT || 3000);
+}).listen(PORT, () => {
+  console.log(`🌐 HTTP Keep-Alive Server listening on port ${PORT}`);
+});
+
+// --- LOGIN ---
+client.login(process.env.DISCORD_TOKEN).catch(err => {
+  console.error('❌ Failed to log in to Discord:', err);
+  process.exit(1);
+});
