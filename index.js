@@ -18,9 +18,18 @@ const {
 } = require('discord.js');
 const http = require('http');
 
-// --- ⚠️ CONFIGURATION ⚠️ ---
-const GUILD_ID = '1371775026264670228'; // Server ID
-const HELPER_ROLE_ID = 'YOUR_HELPER_ROLE_ID'; // Replace with your @Ultra Helper Role ID
+// --- ⚠️ GLOBAL CRASH PROTECTION ⚠️ ---
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err, origin) => {
+  console.error(`Uncaught Exception: ${err.message}\nOrigin: ${origin}`);
+});
+
+// --- CONFIGURATION ---
+const GUILD_ID = process.env.GUILD_ID || '1371775026264670228';
+const HELPER_ROLE_ID = process.env.HELPER_ROLE_ID || 'YOUR_HELPER_ROLE_ID';
 
 const client = new Client({
   intents: [
@@ -35,11 +44,10 @@ const client = new Client({
 // --- IN-MEMORY DATA STORES ---
 const activeTickets = new Map();
 const helperPoints = new Map();
-const userRequestCounts = new Map(); // Tracks requester ticket totals
+const userRequestCounts = new Map();
 const guildSettings = new Map();
-const roleRewards = new Map(); // Points -> RoleID mapping
+const roleRewards = new Map();
 
-// Helper to parse button style strings
 function parseButtonStyle(styleStr) {
   switch ((styleStr || '').toLowerCase()) {
     case 'green': return ButtonStyle.Success;
@@ -50,25 +58,17 @@ function parseButtonStyle(styleStr) {
   }
 }
 
-// Helper to calculate points based on custom value or fallback category/type
 function getPointsForTicket(ticketData) {
   if (ticketData.customPoints && ticketData.customPoints > 0) {
     return ticketData.customPoints;
   }
   const normalized = (ticketData.type || '').toLowerCase();
-  if (normalized.includes('weekly') || normalized.includes('ultraweekly') || normalized.includes('ultra weeklies')) {
-    return 10;
-  }
-  if (normalized.includes('daily') || normalized.includes('ultradaily') || normalized.includes('ultra dailies')) {
-    return 5;
-  }
-  if (normalized.includes('farm') || normalized.includes('farming')) {
-    return 3;
-  }
-  return 1; // Default
+  if (normalized.includes('weekly') || normalized.includes('ultraweekly')) return 10;
+  if (normalized.includes('daily') || normalized.includes('ultradaily')) return 5;
+  if (normalized.includes('farm') || normalized.includes('farming')) return 3;
+  return 1;
 }
 
-// Helper function to check & assign auto-roles when points are updated
 async function checkAndAssignHelperRoles(guild, userId, currentPoints) {
   try {
     const member = await guild.members.fetch(userId).catch(() => null);
@@ -86,7 +86,6 @@ async function checkAndAssignHelperRoles(guild, userId, currentPoints) {
   }
 }
 
-// Helper to update control panel embed
 async function updateTicketEmbed(channel, ticketData) {
   try {
     const pinnedMessages = await channel.messages.fetchPinned();
@@ -114,31 +113,25 @@ async function updateTicketEmbed(channel, ticketData) {
   }
 }
 
-// --- SLASH COMMANDS REGISTRATION ---
+// --- SLASH COMMANDS DEFINITION ---
+// 4 options per button (label, role, max, points) * 5 buttons = 20 + 4 base options = 24 options (Under 25 limit!)
+const setupCommand = new SlashCommandBuilder()
+  .setName('ticket-setup')
+  .setDescription('Post the interactive ticket setup panel')
+  .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
+  .addStringOption(opt => opt.setName('title').setDescription('Embed title').setRequired(true))
+  .addStringOption(opt => opt.setName('description').setDescription('Embed description').setRequired(true))
+  .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false));
+
+for (let i = 1; i <= 5; i++) {
+  setupCommand.addStringOption(opt => opt.setName(`btn${i}_label`).setDescription(`Btn ${i} Label`).setRequired(i === 1));
+  setupCommand.addRoleOption(opt => opt.setName(`btn${i}_role`).setDescription(`Role to ping for Btn ${i}`).setRequired(false));
+  setupCommand.addIntegerOption(opt => opt.setName(`btn${i}_max`).setDescription(`Helper Limit (1-6)`).setMinValue(1).setMaxValue(6).setRequired(false));
+  setupCommand.addIntegerOption(opt => opt.setName(`btn${i}_points`).setDescription(`Points awarded`).setMinValue(1).setRequired(false));
+}
+
 const commands = [
-  new SlashCommandBuilder()
-    .setName('ticket-setup')
-    .setDescription('Post the interactive ticket setup panel')
-    .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
-    .addStringOption(opt => opt.setName('title').setDescription('Embed title').setRequired(true))
-    .addStringOption(opt => opt.setName('description').setDescription('Embed description').setRequired(true))
-    
-    // Button 1 Options
-    .addStringOption(opt => opt.setName('btn1_label').setDescription('Button 1 Label').setRequired(true))
-    .addStringOption(opt => opt.setName('btn1_emoji').setDescription('Button 1 Emoji (optional)').setRequired(false))
-    .addStringOption(opt => opt.setName('btn1_style').setDescription('Button 1 Style').setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn1_max').setDescription('Helper Limit (1-6)').setMinValue(1).setMaxValue(6).setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn1_points').setDescription('Points to award').setMinValue(1).setRequired(false))
-
-    // Button 2 Options
-    .addStringOption(opt => opt.setName('btn2_label').setDescription('Button 2 Label').setRequired(false))
-    .addStringOption(opt => opt.setName('btn2_emoji').setDescription('Button 2 Emoji').setRequired(false))
-    .addStringOption(opt => opt.setName('btn2_style').setDescription('Button 2 Style').setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn2_max').setDescription('Helper Limit (1-6)').setMinValue(1).setMaxValue(6).setRequired(false))
-    .addIntegerOption(opt => opt.setName('btn2_points').setDescription('Points to award').setMinValue(1).setRequired(false))
-
-    .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false)),
-
+  setupCommand,
   new SlashCommandBuilder()
     .setName('leaderboard')
     .setDescription('View top helpers and top requesters'),
@@ -181,31 +174,34 @@ const commands = [
     )
 ];
 
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-
+// --- REGISTER COMMANDS ---
 async function registerCommands() {
+  if (!process.env.DISCORD_TOKEN) {
+    console.error('❌ DISCORD_TOKEN missing in environment variables!');
+    return;
+  }
+
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
+    console.log('🔄 Syncing slash commands...');
+    await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: [] });
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
     );
+    console.log('✅ Slash commands updated successfully!');
   } catch (error) {
-    console.error('Error registering commands:', error);
+    console.error('❌ Error registering commands:', error);
   }
 }
 
 // --- BOT READY ---
 client.once(Events.ClientReady, async () => {
-  console.log(`LoggedIn as ${client.user.tag}`);
-
+  console.log(`🤖 Logged in as ${client.user.tag}`);
   client.user.setPresence({
     status: 'dnd',
-    activities: [{
-      name: 'AQW Leaderboard',
-      type: 5
-    }]
+    activities: [{ name: 'AQW Leaderboard', type: 5 }]
   });
-
   await registerCommands();
 });
 
@@ -217,13 +213,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // 1. TICKET BUTTON CLICK -> MODAL
     if (interaction.isButton() && interaction.customId.startsWith('tselect_')) {
       const parts = interaction.customId.split('_');
-      const customPoints = parts[parts.length - 1];
-      const maxHelpers = parts[parts.length - 2];
-      const categoryName = parts.slice(1, -2).join(' ');
+      const roleId = parts[parts.length - 1];
+      const customPoints = parts[parts.length - 2];
+      const maxHelpers = parts[parts.length - 3];
+      const categoryName = parts.slice(1, -3).join(' ');
 
       const modal = new ModalBuilder()
-        .setCustomId(`ticket_form_${maxHelpers}_${customPoints}_${categoryName.replace(/\s+/g, '_')}`)
-        .setTitle(`Ticket: ${categoryName}`);
+        .setCustomId(`ticket_form_${maxHelpers}_${customPoints}_${roleId}_${categoryName.replace(/\s+/g, '_')}`)
+        .setTitle(`Ticket: ${categoryName.slice(0, 25)}`);
 
       const ignInput = new TextInputBuilder()
         .setCustomId('ign')
@@ -263,7 +260,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return await interaction.showModal(modal);
     }
 
-    // 2. MODAL SUBMIT -> CREATE CHANNEL
+    // 2. MODAL SUBMIT -> CREATE TICKET CHANNEL
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_form_')) {
       await interaction.deferReply({ ephemeral: true });
 
@@ -271,19 +268,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const parts = interaction.customId.replace('ticket_form_', '').split('_');
         const maxHelpers = parseInt(parts[0]) || 6;
         const customPoints = parseInt(parts[1]) || 0;
-        const ticketType = parts.slice(2).join(' ');
+        const targetRoleId = parts[2];
+        const ticketType = parts.slice(3).join(' ');
 
         const ign = interaction.fields.getTextInputValue('ign');
         const serverName = interaction.fields.getTextInputValue('server');
         const rawMap = interaction.fields.getTextInputValue('map_name').trim();
         const description = interaction.fields.getTextInputValue('description');
 
-        // Room generation
         const cleanMap = rawMap.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
         const random4Digit = Math.floor(1000 + Math.random() * 9000);
         const room = `/join ${cleanMap}-${random4Digit}`;
 
-        // Increment requester stats
         const currentReqs = userRequestCounts.get(interaction.user.id) || 0;
         userRequestCounts.set(interaction.user.id, currentReqs + 1);
 
@@ -303,6 +299,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         activeTickets.set(ticketChannel.id, {
           requesterId: interaction.user.id,
           type: ticketType,
+          targetRoleId: targetRoleId !== 'none' ? targetRoleId : null,
           ign,
           server: serverName,
           room,
@@ -312,7 +309,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           helpers: []
         });
 
-        // Minimalist public embed
         const embed = new EmbedBuilder()
           .setTitle(`Ticket - ${ticketType}`)
           .addFields(
@@ -325,7 +321,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setColor('#2b2d31')
           .setTimestamp();
 
-        // Row 1: Active Actions (Max 5 buttons per row allowed by Discord API)
         const row1 = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('btn_location').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
           new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept').setStyle(ButtonStyle.Success).setEmoji('✅'),
@@ -333,18 +328,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
           new ButtonBuilder().setCustomId('btn_pinghelpers').setLabel('Ping').setStyle(ButtonStyle.Secondary).setEmoji('📢')
         );
 
-        // Row 2: Ticket Controls
         const row2 = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('btn_cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger),
           new ButtonBuilder().setCustomId('btn_complete').setLabel('Complete').setStyle(ButtonStyle.Primary)
         );
 
-        const helperRolePing = HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper';
-        
-        const mainMsg = await ticketChannel.send({ 
-          content: `Hey ${interaction.user}! ${helperRolePing}`, 
-          embeds: [embed], 
-          components: [row1, row2] 
+        const rolePing = targetRoleId && targetRoleId !== 'none'
+          ? `<@&${targetRoleId}>`
+          : (HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper');
+
+        const mainMsg = await ticketChannel.send({
+          content: `Hey ${interaction.user}! ${rolePing}`,
+          embeds: [embed],
+          components: [row1, row2]
         });
         await mainMsg.pin().catch(() => {});
 
@@ -355,12 +351,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // 3. TICKET ACTIONS
+    // 3. TICKET ACTION BUTTONS
     if (interaction.isButton()) {
       const ticketData = activeTickets.get(interaction.channel.id);
       const customId = interaction.customId;
 
-      // Single Location & Info Access
       if (customId === 'btn_location') {
         if (!ticketData) return interaction.reply({ content: '❌ Ticket not found.', ephemeral: true });
 
@@ -370,7 +365,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         if (!isRequester && !isHelper && !isAdmin) {
           return interaction.reply({
-            content: '🔒 **Access Denied:** Click **Accept** first to view the private location.',
+            content: '🔒 **Access Denied:** Click **Accept** first to view private details.',
             ephemeral: true
           });
         }
@@ -425,8 +420,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       if (customId === 'btn_pinghelpers') {
-        const helperRolePing = HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper';
-        return interaction.reply({ content: `📢 ${helperRolePing} assistance requested!` });
+        const rolePing = ticketData?.targetRoleId
+          ? `<@&${ticketData.targetRoleId}>`
+          : (HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper');
+
+        return interaction.reply({ content: `📢 ${rolePing} assistance requested!` });
       }
 
       if (customId === 'btn_cancel') {
@@ -446,7 +444,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         await interaction.deferReply();
-
         await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
 
         let awardedText = '';
@@ -479,7 +476,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // 4. COMMANDS
+    // 4. CHAT COMMANDS
     if (interaction.isChatInputCommand()) {
       const { commandName, options } = interaction;
 
@@ -503,39 +500,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const row = new ActionRowBuilder();
 
-        const b1Label = options.getString('btn1_label');
-        const b1Emoji = options.getString('btn1_emoji');
-        const b1Style = options.getString('btn1_style');
-        const b1Max = options.getInteger('btn1_max') || 6;
-        const b1Points = options.getInteger('btn1_points') || 0;
+        for (let i = 1; i <= 5; i++) {
+          const label = options.getString(`btn${i}_label`);
+          if (label) {
+            const role = options.getRole(`btn${i}_role`);
+            const roleId = role ? role.id : 'none';
+            const max = options.getInteger(`btn${i}_max`) || 6;
+            const points = options.getInteger(`btn${i}_points`) || 0;
 
-        const btn1 = new ButtonBuilder()
-          .setCustomId(`tselect_${b1Label.toLowerCase().replace(/\s+/g, '_')}_${b1Max}_${b1Points}`)
-          .setLabel(b1Label)
-          .setStyle(parseButtonStyle(b1Style));
-        if (b1Emoji) btn1.setEmoji(b1Emoji);
-        row.addComponents(btn1);
+            const btn = new ButtonBuilder()
+              .setCustomId(`tselect_${label.toLowerCase().replace(/\s+/g, '_')}_${max}_${points}_${roleId}`)
+              .setLabel(label)
+              .setStyle(i % 2 === 1 ? ButtonStyle.Primary : ButtonStyle.Secondary);
 
-        const b2Label = options.getString('btn2_label');
-        if (b2Label) {
-          const b2Emoji = options.getString('btn2_emoji');
-          const b2Style = options.getString('btn2_style');
-          const b2Max = options.getInteger('btn2_max') || 6;
-          const b2Points = options.getInteger('btn2_points') || 0;
-
-          const btn2 = new ButtonBuilder()
-            .setCustomId(`tselect_${b2Label.toLowerCase().replace(/\s+/g, '_')}_${b2Max}_${b2Points}`)
-            .setLabel(b2Label)
-            .setStyle(parseButtonStyle(b2Style));
-          if (b2Emoji) btn2.setEmoji(b2Emoji);
-          row.addComponents(btn2);
+            row.addComponents(btn);
+          }
         }
 
         await channel.send({ embeds: [embed], components: [row] });
-        return await interaction.editReply('✅ Panel posted!');
+        return await interaction.editReply('✅ Panel posted with roles configured!');
       }
 
-      // Minimalist Dual Leaderboard
       if (commandName === 'leaderboard') {
         const sortedHelpers = [...helperPoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
         const sortedRequesters = [...userRequestCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -625,15 +610,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Error handling interaction:', error);
   }
 });
 
 // --- LOGIN ---
-client.login(process.env.DISCORD_TOKEN);
+if (!process.env.DISCORD_TOKEN) {
+  console.error('❌ DISCORD_TOKEN environment variable missing!');
+} else {
+  client.login(process.env.DISCORD_TOKEN).catch(err => {
+    console.error('❌ Login failed:', err.message);
+  });
+}
 
-// --- HTTP SERVER FOR KEEP-ALIVE ---
+// --- KEEP-ALIVE HTTP SERVER ---
+const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.write("Bot is alive!");
   res.end();
-}).listen(process.env.PORT || 3000);
+}).listen(PORT, () => console.log(`🌐 Keep-alive server running on port ${PORT}`));
