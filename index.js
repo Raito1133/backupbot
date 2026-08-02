@@ -41,63 +41,62 @@ const userRequestCounts = new Map();
 const guildSettings = new Map();
 const roleRewards = new Map();
 
-// --- ⚙️ EDIT YOUR TICKET PRESETS HERE ⚙️ ---
-// You can set custom role IDs and standard emojis or custom Discord emojis (e.g., '<:custom_emoji:123456789012345678>')
+// --- ⚙️ YOUR CUSTOM TICKET PRESETS ⚙️ ---
 const TICKET_PRESETS = {
   farming: { 
     label: 'Farming Assistance', 
     max: 3, 
     points: 3, 
-    emoji: '🌾', 
-    roleId: 'YOUR_FARMING_ROLE_ID' 
+    emoji: '<:queststart:1531490481991843862>', 
+    roleIds: ['1529499059596038285'] 
   },
   ultra_weeklies: { 
     label: 'Ultra Weeklies', 
     max: 3, 
-    points: 10, 
-    emoji: '⚔️', 
-    roleId: 'YOUR_ULTRA_WEEKLIES_ROLE_ID' 
+    points: 8, 
+    emoji: '<:aqwDecay:1533349135460335668>', 
+    roleIds: ['1529499021884919858'] 
   },
   seven_man_dailies: { 
     label: '7-Man Dailies', 
     max: 6, 
     points: 5, 
-    emoji: '🛡️', 
-    roleId: 'YOUR_7MAN_ROLE_ID' 
+    emoji: '<:aqwGauntlet:1531490394146078820>', 
+    roleIds: ['1529499059596038285', '1529499021884919858'] 
   },
   ultra_dailies: { 
     label: 'Ultra Dailies', 
     max: 3, 
     points: 5, 
-    emoji: '🔥', 
-    roleId: 'YOUR_ULTRA_DAILIES_ROLE_ID' 
+    emoji: '<:wolfblade:1533348197223632956>', 
+    roleIds: ['1529499021884919858'] 
   },
   server_ticket: { 
     label: 'Server Ticket / Support', 
     max: 2, 
-    points: 1, 
-    emoji: '❓', 
-    roleId: 'YOUR_STAFF_ROLE_ID' 
+    points: 0, 
+    emoji: '<:Ticket:1533348464908435526>', 
+    roleIds: ['1529498802149392614'] 
   },
   boss_help: { 
     label: 'General Boss Help', 
     max: 3, 
     points: 2, 
-    emoji: '👾', 
-    roleId: 'YOUR_BOSS_HELP_ROLE_ID' 
+    emoji: '<:AQW_sword:1531490097768304714>', 
+    roleIds: ['1529499059596038285'] 
   },
   other_help: { 
     label: 'Other Requests', 
     max: 4, 
     points: 1, 
-    emoji: '📌', 
-    roleId: 'YOUR_OTHER_ROLE_ID' 
+    emoji: '<:aqwScroll:1533349936438181908>', 
+    roleIds: ['1529499059596038285'] 
   }
 };
 
 // Helper to calculate points based on custom value or fallback category/type
 function getPointsForTicket(ticketData) {
-  if (ticketData.customPoints && ticketData.customPoints > 0) {
+  if (ticketData.customPoints !== undefined && ticketData.customPoints >= 0) {
     return ticketData.customPoints;
   }
   const normalized = (ticketData.type || '').toLowerCase();
@@ -248,10 +247,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // 1. DROPDOWN SELECTION -> MODAL
     if (interaction.isStringSelectMenu() && interaction.customId === 'select_ticket_cat') {
       const selectedKey = interaction.values[0];
-      const preset = TICKET_PRESETS[selectedKey] || { label: 'Ticket', max: 6, points: 1, roleId: HELPER_ROLE_ID };
+      const preset = TICKET_PRESETS[selectedKey] || { label: 'Ticket', max: 6, points: 1, roleIds: [HELPER_ROLE_ID] };
 
       const modal = new ModalBuilder()
-        .setCustomId(`ticket_form_${preset.max}_${preset.points}_${preset.roleId}_${selectedKey}`)
+        .setCustomId(`ticket_form_${preset.max}_${preset.points}_${selectedKey}`)
         .setTitle(`Ticket: ${preset.label}`);
 
       const ignInput = new TextInputBuilder()
@@ -300,8 +299,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const parts = interaction.customId.replace('ticket_form_', '').split('_');
         const maxHelpers = parseInt(parts[0]) || 6;
         const customPoints = parseInt(parts[1]) || 0;
-        const pingRoleId = parts[2] !== 'none' && parts[2] !== 'YOUR_FARMING_ROLE_ID' ? parts[2] : HELPER_ROLE_ID;
-        const ticketType = parts.slice(3).join('_');
+        const ticketType = parts.slice(2).join('_');
+
+        const preset = TICKET_PRESETS[ticketType] || {};
+        const pingRoleIds = preset.roleIds || [HELPER_ROLE_ID];
 
         const ign = interaction.fields.getTextInputValue('ign');
         const serverName = interaction.fields.getTextInputValue('server');
@@ -337,7 +338,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           description,
           maxHelpers,
           customPoints,
-          pingRoleId,
+          pingRoleIds,
           helpers: []
         });
 
@@ -355,7 +356,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         let actionComponents = [];
 
-        // Check if it's the general concerns/server ticket to assign only Accept (Claim) and Cancel buttons
         if (ticketType === 'server_ticket') {
           const simpleRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept').setStyle(ButtonStyle.Success).setEmoji('✅'),
@@ -363,7 +363,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           );
           actionComponents.push(simpleRow);
         } else {
-          // Standard full action row for standard AQW request tickets
           const row1 = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('btn_location').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
             new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept').setStyle(ButtonStyle.Success).setEmoji('✅'),
@@ -378,7 +377,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           actionComponents.push(row1, row2);
         }
 
-        const helperRolePing = pingRoleId && pingRoleId !== 'YOUR_HELPER_ROLE_ID' ? `<@&${pingRoleId}>` : '@Helper';
+        const helperRolePing = pingRoleIds.length > 0 
+          ? pingRoleIds.map(id => `<@&${id}>`).join(' ') 
+          : '@Helper';
         
         const mainMsg = await ticketChannel.send({ 
           content: `Hey ${interaction.user}! ${helperRolePing}`, 
@@ -463,8 +464,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       if (customId === 'btn_pinghelpers') {
-        const effectiveRoleId = ticketData?.pingRoleId || HELPER_ROLE_ID;
-        const helperRolePing = effectiveRoleId && effectiveRoleId !== 'YOUR_HELPER_ROLE_ID' ? `<@&${effectiveRoleId}>` : '@Helper';
+        const pingRoleIds = ticketData?.pingRoleIds || [];
+        const helperRolePing = pingRoleIds.length > 0 ? pingRoleIds.map(id => `<@&${id}>`).join(' ') : '@Helper';
         return interaction.reply({ content: `📢 ${helperRolePing} assistance requested!` });
       }
 
