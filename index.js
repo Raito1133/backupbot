@@ -5,6 +5,8 @@ const {
   Events,
   EmbedBuilder,
   ActionRowBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   ButtonBuilder,
   ButtonStyle,
   ModalBuilder,
@@ -20,7 +22,7 @@ const http = require('http');
 
 // --- ⚠️ CONFIGURATION ⚠️ ---
 const GUILD_ID = '1371775026264670228'; // Server ID
-const HELPER_ROLE_ID = 'YOUR_HELPER_ROLE_ID'; // Replace with your default @Ultra Helper Role ID
+const HELPER_ROLE_ID = 'YOUR_HELPER_ROLE_ID'; // Default Helper Role ID
 
 const client = new Client({
   intents: [
@@ -35,20 +37,9 @@ const client = new Client({
 // --- IN-MEMORY DATA STORES ---
 const activeTickets = new Map();
 const helperPoints = new Map();
-const userRequestCounts = new Map(); // Tracks requester ticket totals
+const userRequestCounts = new Map();
 const guildSettings = new Map();
-const roleRewards = new Map(); // Points -> RoleID mapping
-
-// Helper to parse button style strings
-function parseButtonStyle(styleStr) {
-  switch ((styleStr || '').toLowerCase()) {
-    case 'green': return ButtonStyle.Success;
-    case 'red': return ButtonStyle.Danger;
-    case 'blue': return ButtonStyle.Primary;
-    case 'grey':
-    case 'gray': default: return ButtonStyle.Secondary;
-  }
-}
+const roleRewards = new Map();
 
 // Helper to calculate points based on custom value or fallback category/type
 function getPointsForTicket(ticketData) {
@@ -65,7 +56,7 @@ function getPointsForTicket(ticketData) {
   if (normalized.includes('farm') || normalized.includes('farming')) {
     return 3;
   }
-  return 1; // Default
+  return 1;
 }
 
 // Helper function to check & assign auto-roles when points are updated
@@ -114,39 +105,27 @@ async function updateTicketEmbed(channel, ticketData) {
   }
 }
 
-// Helper function to build setup commands cleanly
-function createSetupCommand(name, description, buttonCount) {
-  const cmd = new SlashCommandBuilder()
-    .setName(name)
-    .setDescription(description)
-    .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
-    .addStringOption(opt => opt.setName('title').setDescription('Embed title').setRequired(true))
-    .addStringOption(opt => opt.setName('description').setDescription('Embed description').setRequired(true))
-    .addRoleOption(opt => opt.setName('role_mention').setDescription('Role to ping on ticket creation').setRequired(false))
-    .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false));
-
-  for (let i = 1; i <= buttonCount; i++) {
-    const isFirst = (i === 1);
-    cmd
-      .addStringOption(opt => opt.setName(`btn${i}_label`).setDescription(`Button ${i} Label`).setRequired(isFirst))
-      .addStringOption(opt => opt.setName(`btn${i}_emoji`).setDescription(`Button ${i} Emoji`).setRequired(false))
-      .addStringOption(opt => opt.setName(`btn${i}_style`).setDescription(`Button ${i} Style`).setRequired(false))
-      .addIntegerOption(opt => opt.setName(`btn${i}_max`).setDescription(`Helper Limit (1-6)`).setMinValue(1).setMaxValue(6).setRequired(false))
-      .addIntegerOption(opt => opt.setName(`btn${i}_points`).setDescription(`Points to award`).setMinValue(1).setRequired(false));
-  }
-
-  return cmd;
-}
+// Map for Category preset settings (Max Helpers, Points, and default Roles)
+const TICKET_PRESETS = {
+  farming: { label: 'Farming Assistance', max: 3, points: 3, emoji: '🌾' },
+  ultra_weeklies: { label: 'Ultra Weeklies', max: 3, points: 10, emoji: '⚔️' },
+  seven_man_dailies: { label: '7-Man Dailies', max: 6, points: 5, emoji: '🛡️' },
+  ultra_dailies: { label: 'Ultra Dailies', max: 3, points: 5, emoji: '🔥' },
+  server_ticket: { label: 'Server Ticket / Support', max: 2, points: 1, emoji: '❓' },
+  boss_help: { label: 'General Boss Help', max: 3, points: 2, emoji: '👾' },
+  other_help: { label: 'Other Requests', max: 4, points: 1, emoji: '📌' }
+};
 
 // --- SLASH COMMANDS REGISTRATION ---
-const setup1 = createSetupCommand('ticket-setup-1', 'Post setup panel 1 (Buttons 1 to 3)', 3);
-const setup2 = createSetupCommand('ticket-setup-2', 'Post setup panel 2 (Buttons 4 and 5)', 2);
-const setup3 = createSetupCommand('ticket-setup-3', 'Post setup panel 3 (Buttons 6 and 7)', 2);
-
 const commands = [
-  setup1,
-  setup2,
-  setup3,
+  new SlashCommandBuilder()
+    .setName('ticket-setup-panel')
+    .setDescription('Post the unified 7-option ticket panel under one single embed')
+    .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
+    .addStringOption(opt => opt.setName('title').setDescription('Embed Title').setRequired(true))
+    .addStringOption(opt => opt.setName('description').setDescription('Embed Description').setRequired(true))
+    .addRoleOption(opt => opt.setName('role_mention').setDescription('Default Role to mention on ticket creation').setRequired(false))
+    .addChannelOption(opt => opt.setName('category').setDescription('Ticket Channel Category').setRequired(false)),
 
   new SlashCommandBuilder()
     .setName('leaderboard')
@@ -198,7 +177,7 @@ async function registerCommands() {
       Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
     );
-    console.log('✅ All slash commands successfully registered!');
+    console.log('✅ Slash commands successfully registered!');
   } catch (error) {
     console.error('Error registering commands:', error);
   }
@@ -224,17 +203,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.guild || interaction.guild.id !== GUILD_ID) return;
 
   try {
-    // 1. TICKET BUTTON CLICK -> MODAL
-    if (interaction.isButton() && interaction.customId.startsWith('tselect_')) {
-      const parts = interaction.customId.split('_');
-      const roleId = parts[parts.length - 1];
-      const customPoints = parts[parts.length - 2];
-      const maxHelpers = parts[parts.length - 3];
-      const categoryName = parts.slice(1, -3).join(' ');
+    // 1. DROPDOWN SELECTION -> MODAL
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('select_ticket_cat_')) {
+      const pingRoleId = interaction.customId.replace('select_ticket_cat_', '');
+      const selectedKey = interaction.values[0];
+      const preset = TICKET_PRESETS[selectedKey] || { label: 'Ticket', max: 6, points: 1 };
 
       const modal = new ModalBuilder()
-        .setCustomId(`ticket_form_${maxHelpers}_${customPoints}_${roleId}_${categoryName.replace(/\s+/g, '_')}`)
-        .setTitle(`Ticket: ${categoryName}`);
+        .setCustomId(`ticket_form_${preset.max}_${preset.points}_${pingRoleId}_${selectedKey}`)
+        .setTitle(`Ticket: ${preset.label}`);
 
       const ignInput = new TextInputBuilder()
         .setCustomId('ign')
@@ -324,7 +301,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
 
         const embed = new EmbedBuilder()
-          .setTitle(`Ticket - ${ticketType}`)
+          .setTitle(`Ticket - ${ticketType.replace(/_/g, ' ').toUpperCase()}`)
           .addFields(
             { name: 'Requester:', value: `${interaction.user}`, inline: true },
             { name: 'IGN:', value: `\`${ign}\``, inline: true },
@@ -492,7 +469,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isChatInputCommand()) {
       const { commandName, options } = interaction;
 
-      if (['ticket-setup-1', 'ticket-setup-2', 'ticket-setup-3'].includes(commandName)) {
+      if (commandName === 'ticket-setup-panel') {
         await interaction.deferReply({ ephemeral: true });
         const channel = options.getChannel('channel');
         const title = options.getString('title');
@@ -511,30 +488,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setDescription(desc)
           .setColor('#2b2d31');
 
-        const row = new ActionRowBuilder();
-        const maxButtonsInCmd = commandName === 'ticket-setup-1' ? 3 : 2;
+        const pingRoleIdStr = roleMention ? roleMention.id : 'none';
 
-        for (let i = 1; i <= maxButtonsInCmd; i++) {
-          const label = options.getString(`btn${i}_label`);
-          if (!label) continue;
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId(`select_ticket_cat_${pingRoleIdStr}`)
+          .setPlaceholder('Select a ticket type...')
+          .addOptions(
+            Object.entries(TICKET_PRESETS).map(([key, item]) => 
+              new StringSelectMenuOptionBuilder()
+                .setLabel(item.label)
+                .setValue(key)
+                .setEmoji(item.emoji)
+            )
+          );
 
-          const emoji = options.getString(`btn${i}_emoji`);
-          const style = options.getString(`btn${i}_style`);
-          const max = options.getInteger(`btn${i}_max`) || 6;
-          const points = options.getInteger(`btn${i}_points`) || 0;
-          const roleIdStr = roleMention ? roleMention.id : 'none';
-
-          const btn = new ButtonBuilder()
-            .setCustomId(`tselect_${label.toLowerCase().replace(/\s+/g, '_')}_${max}_${points}_${roleIdStr}`)
-            .setLabel(label)
-            .setStyle(parseButtonStyle(style));
-
-          if (emoji) btn.setEmoji(emoji);
-          row.addComponents(btn);
-        }
+        const row = new ActionRowBuilder().addComponents(selectMenu);
 
         await channel.send({ embeds: [embed], components: [row] });
-        return await interaction.editReply(`✅ Panel posted to ${channel}!`);
+        return await interaction.editReply(`✅ Unified 7-option panel posted to ${channel}!`);
       }
 
       if (commandName === 'leaderboard') {
