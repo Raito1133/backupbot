@@ -29,7 +29,7 @@ process.on('uncaughtException', (err, origin) => {
 
 // --- CONFIGURATION ---
 const GUILD_ID = process.env.GUILD_ID || '1371775026264670228';
-const HELPER_ROLE_ID = process.env.HELPER_ROLE_ID || 'YOUR_HELPER_ROLE_ID';
+const HELPER_ROLE_ID = process.env.HELPER_ROLE_ID || '1529499021884919858';
 
 const client = new Client({
   intents: [
@@ -114,7 +114,6 @@ async function updateTicketEmbed(channel, ticketData) {
 }
 
 // --- SLASH COMMANDS DEFINITION ---
-// 4 options per button (label, role, max, points) * 5 buttons = 20 + 4 base options = 24 options (Under 25 limit!)
 const setupCommand = new SlashCommandBuilder()
   .setName('ticket-setup')
   .setDescription('Post the interactive ticket setup panel')
@@ -184,7 +183,9 @@ async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
     console.log('🔄 Syncing slash commands...');
+    // Clear guild command cache first
     await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: [] });
+    // Register current commands
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
