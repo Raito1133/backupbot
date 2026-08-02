@@ -18,18 +18,9 @@ const {
 } = require('discord.js');
 const http = require('http');
 
-// --- ⚠️ GLOBAL CRASH PROTECTION ⚠️ ---
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-process.on('uncaughtException', (err, origin) => {
-  console.error(`Uncaught Exception: ${err.message}\nOrigin: ${origin}`);
-});
-
-// --- CONFIGURATION ---
-const GUILD_ID = process.env.GUILD_ID || '1371775026264670228';
-const HELPER_ROLE_ID = process.env.HELPER_ROLE_ID || '1529499021884919858';
+// --- ⚠️ CONFIGURATION ⚠️ ---
+const GUILD_ID = '1371775026264670228'; // Server ID
+const HELPER_ROLE_ID = 'YOUR_HELPER_ROLE_ID'; // Replace with your default @Ultra Helper Role ID
 
 const client = new Client({
   intents: [
@@ -44,10 +35,11 @@ const client = new Client({
 // --- IN-MEMORY DATA STORES ---
 const activeTickets = new Map();
 const helperPoints = new Map();
-const userRequestCounts = new Map();
+const userRequestCounts = new Map(); // Tracks requester ticket totals
 const guildSettings = new Map();
-const roleRewards = new Map();
+const roleRewards = new Map(); // Points -> RoleID mapping
 
+// Helper to parse button style strings
 function parseButtonStyle(styleStr) {
   switch ((styleStr || '').toLowerCase()) {
     case 'green': return ButtonStyle.Success;
@@ -58,17 +50,25 @@ function parseButtonStyle(styleStr) {
   }
 }
 
+// Helper to calculate points based on custom value or fallback category/type
 function getPointsForTicket(ticketData) {
   if (ticketData.customPoints && ticketData.customPoints > 0) {
     return ticketData.customPoints;
   }
   const normalized = (ticketData.type || '').toLowerCase();
-  if (normalized.includes('weekly') || normalized.includes('ultraweekly')) return 10;
-  if (normalized.includes('daily') || normalized.includes('ultradaily')) return 5;
-  if (normalized.includes('farm') || normalized.includes('farming')) return 3;
-  return 1;
+  if (normalized.includes('weekly') || normalized.includes('ultraweekly') || normalized.includes('ultra weeklies')) {
+    return 10;
+  }
+  if (normalized.includes('daily') || normalized.includes('ultradaily') || normalized.includes('ultra dailies')) {
+    return 5;
+  }
+  if (normalized.includes('farm') || normalized.includes('farming')) {
+    return 3;
+  }
+  return 1; // Default
 }
 
+// Helper function to check & assign auto-roles when points are updated
 async function checkAndAssignHelperRoles(guild, userId, currentPoints) {
   try {
     const member = await guild.members.fetch(userId).catch(() => null);
@@ -86,6 +86,7 @@ async function checkAndAssignHelperRoles(guild, userId, currentPoints) {
   }
 }
 
+// Helper to update control panel embed
 async function updateTicketEmbed(channel, ticketData) {
   try {
     const pinnedMessages = await channel.messages.fetchPinned();
@@ -113,24 +114,47 @@ async function updateTicketEmbed(channel, ticketData) {
   }
 }
 
-// --- SLASH COMMANDS DEFINITION ---
-const setupCommand = new SlashCommandBuilder()
-  .setName('ticket-setup')
-  .setDescription('Post the interactive ticket setup panel')
+// Helper builder function for adding button options dynamically
+function addButtonOptions(builder, count) {
+  for (let i = 1; i <= count; i++) {
+    const isFirst = (i === 1);
+    builder
+      .addStringOption(opt => opt.setName(`btn${i}_label`).setDescription(`Button ${i} Label`).setRequired(isFirst))
+      .addStringOption(opt => opt.setName(`btn${i}_emoji`).setDescription(`Button ${i} Emoji`).setRequired(false))
+      .addStringOption(opt => opt.setName(`btn${i}_style`).setDescription(`Button ${i} Style`).setRequired(false))
+      .addIntegerOption(opt => opt.setName(`btn${i}_max`).setDescription(`Helper Limit (1-6)`).setMinValue(1).setMaxValue(6).setRequired(false))
+      .addIntegerOption(opt => opt.setName(`btn${i}_points`).setDescription(`Points to award`).setMinValue(1).setRequired(false));
+  }
+  return builder;
+}
+
+// --- SLASH COMMANDS REGISTRATION ---
+const setup1 = new SlashCommandBuilder()
+  .setName('ticket-setup-1')
+  .setDescription('Post setup panel 1 (up to 4 buttons)')
   .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
   .addStringOption(opt => opt.setName('title').setDescription('Embed title').setRequired(true))
   .addStringOption(opt => opt.setName('description').setDescription('Embed description').setRequired(true))
+  .addRoleOption(opt => opt.setName('role_mention').setDescription('Role to ping on ticket creation').setRequired(false))
   .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false));
 
-for (let i = 1; i <= 5; i++) {
-  setupCommand.addStringOption(opt => opt.setName(`btn${i}_label`).setDescription(`Btn ${i} Label`).setRequired(i === 1));
-  setupCommand.addRoleOption(opt => opt.setName(`btn${i}_role`).setDescription(`Role to ping for Btn ${i}`).setRequired(false));
-  setupCommand.addIntegerOption(opt => opt.setName(`btn${i}_max`).setDescription(`Helper Limit (1-6)`).setMinValue(1).setMaxValue(6).setRequired(false));
-  setupCommand.addIntegerOption(opt => opt.setName(`btn${i}_points`).setDescription(`Points awarded`).setMinValue(1).setRequired(false));
-}
+addButtonOptions(setup1, 4);
+
+const setup2 = new SlashCommandBuilder()
+  .setName('ticket-setup-2')
+  .setDescription('Post setup panel 2 (up to 3 buttons)')
+  .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
+  .addStringOption(opt => opt.setName('title').setDescription('Embed title').setRequired(true))
+  .addStringOption(opt => opt.setName('description').setDescription('Embed description').setRequired(true))
+  .addRoleOption(opt => opt.setName('role_mention').setDescription('Role to ping on ticket creation').setRequired(false))
+  .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false));
+
+addButtonOptions(setup2, 3);
 
 const commands = [
-  setupCommand,
+  setup1,
+  setup2,
+
   new SlashCommandBuilder()
     .setName('leaderboard')
     .setDescription('View top helpers and top requesters'),
@@ -173,36 +197,31 @@ const commands = [
     )
 ];
 
-// --- REGISTER COMMANDS ---
-async function registerCommands() {
-  if (!process.env.DISCORD_TOKEN) {
-    console.error('❌ DISCORD_TOKEN missing in environment variables!');
-    return;
-  }
+const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+async function registerCommands() {
   try {
-    console.log('🔄 Syncing slash commands...');
-    // Clear guild command cache first
-    await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: [] });
-    // Register current commands
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
     );
-    console.log('✅ Slash commands updated successfully!');
   } catch (error) {
-    console.error('❌ Error registering commands:', error);
+    console.error('Error registering commands:', error);
   }
 }
 
 // --- BOT READY ---
 client.once(Events.ClientReady, async () => {
-  console.log(`🤖 Logged in as ${client.user.tag}`);
+  console.log(`LoggedIn as ${client.user.tag}`);
+
   client.user.setPresence({
     status: 'dnd',
-    activities: [{ name: 'AQW Leaderboard', type: 5 }]
+    activities: [{
+      name: 'AQW Leaderboard',
+      type: 5
+    }]
   });
+
   await registerCommands();
 });
 
@@ -221,7 +240,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const modal = new ModalBuilder()
         .setCustomId(`ticket_form_${maxHelpers}_${customPoints}_${roleId}_${categoryName.replace(/\s+/g, '_')}`)
-        .setTitle(`Ticket: ${categoryName.slice(0, 25)}`);
+        .setTitle(`Ticket: ${categoryName}`);
 
       const ignInput = new TextInputBuilder()
         .setCustomId('ign')
@@ -261,7 +280,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return await interaction.showModal(modal);
     }
 
-    // 2. MODAL SUBMIT -> CREATE TICKET CHANNEL
+    // 2. MODAL SUBMIT -> CREATE CHANNEL
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_form_')) {
       await interaction.deferReply({ ephemeral: true });
 
@@ -269,7 +288,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const parts = interaction.customId.replace('ticket_form_', '').split('_');
         const maxHelpers = parseInt(parts[0]) || 6;
         const customPoints = parseInt(parts[1]) || 0;
-        const targetRoleId = parts[2];
+        const pingRoleId = parts[2] !== 'none' ? parts[2] : null;
         const ticketType = parts.slice(3).join(' ');
 
         const ign = interaction.fields.getTextInputValue('ign');
@@ -277,10 +296,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const rawMap = interaction.fields.getTextInputValue('map_name').trim();
         const description = interaction.fields.getTextInputValue('description');
 
+        // Room generation
         const cleanMap = rawMap.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
         const random4Digit = Math.floor(1000 + Math.random() * 9000);
         const room = `/join ${cleanMap}-${random4Digit}`;
 
+        // Increment requester stats
         const currentReqs = userRequestCounts.get(interaction.user.id) || 0;
         userRequestCounts.set(interaction.user.id, currentReqs + 1);
 
@@ -300,16 +321,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
         activeTickets.set(ticketChannel.id, {
           requesterId: interaction.user.id,
           type: ticketType,
-          targetRoleId: targetRoleId !== 'none' ? targetRoleId : null,
           ign,
           server: serverName,
           room,
           description,
           maxHelpers,
           customPoints,
+          pingRoleId,
           helpers: []
         });
 
+        // Minimalist public embed
         const embed = new EmbedBuilder()
           .setTitle(`Ticket - ${ticketType}`)
           .addFields(
@@ -322,6 +344,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setColor('#2b2d31')
           .setTimestamp();
 
+        // Row 1: Active Actions
         const row1 = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('btn_location').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
           new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept').setStyle(ButtonStyle.Success).setEmoji('✅'),
@@ -329,19 +352,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
           new ButtonBuilder().setCustomId('btn_pinghelpers').setLabel('Ping').setStyle(ButtonStyle.Secondary).setEmoji('📢')
         );
 
+        // Row 2: Ticket Controls
         const row2 = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('btn_cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger),
           new ButtonBuilder().setCustomId('btn_complete').setLabel('Complete').setStyle(ButtonStyle.Primary)
         );
 
-        const rolePing = targetRoleId && targetRoleId !== 'none'
-          ? `<@&${targetRoleId}>`
-          : (HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper');
-
-        const mainMsg = await ticketChannel.send({
-          content: `Hey ${interaction.user}! ${rolePing}`,
-          embeds: [embed],
-          components: [row1, row2]
+        // Determine helper role mention from button config or global config
+        const effectiveRoleId = pingRoleId || (HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? HELPER_ROLE_ID : null);
+        const helperRolePing = effectiveRoleId ? `<@&${effectiveRoleId}>` : '@Helper';
+        
+        const mainMsg = await ticketChannel.send({ 
+          content: `Hey ${interaction.user}! ${helperRolePing}`, 
+          embeds: [embed], 
+          components: [row1, row2] 
         });
         await mainMsg.pin().catch(() => {});
 
@@ -352,11 +376,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // 3. TICKET ACTION BUTTONS
+    // 3. TICKET ACTIONS
     if (interaction.isButton()) {
       const ticketData = activeTickets.get(interaction.channel.id);
       const customId = interaction.customId;
 
+      // Single Location & Info Access
       if (customId === 'btn_location') {
         if (!ticketData) return interaction.reply({ content: '❌ Ticket not found.', ephemeral: true });
 
@@ -366,7 +391,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         if (!isRequester && !isHelper && !isAdmin) {
           return interaction.reply({
-            content: '🔒 **Access Denied:** Click **Accept** first to view private details.',
+            content: '🔒 **Access Denied:** Click **Accept** first to view the private location.',
             ephemeral: true
           });
         }
@@ -421,11 +446,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       if (customId === 'btn_pinghelpers') {
-        const rolePing = ticketData?.targetRoleId
-          ? `<@&${ticketData.targetRoleId}>`
-          : (HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? `<@&${HELPER_ROLE_ID}>` : '@Helper');
-
-        return interaction.reply({ content: `📢 ${rolePing} assistance requested!` });
+        const effectiveRoleId = ticketData?.pingRoleId || (HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? HELPER_ROLE_ID : null);
+        const helperRolePing = effectiveRoleId ? `<@&${effectiveRoleId}>` : '@Helper';
+        return interaction.reply({ content: `📢 ${helperRolePing} assistance requested!` });
       }
 
       if (customId === 'btn_cancel') {
@@ -445,6 +468,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         await interaction.deferReply();
+
         await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
 
         let awardedText = '';
@@ -477,15 +501,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // 4. CHAT COMMANDS
+    // 4. COMMANDS
     if (interaction.isChatInputCommand()) {
       const { commandName, options } = interaction;
 
-      if (commandName === 'ticket-setup') {
+      if (commandName === 'ticket-setup-1' || commandName === 'ticket-setup-2') {
         await interaction.deferReply({ ephemeral: true });
         const channel = options.getChannel('channel');
         const title = options.getString('title');
         const desc = options.getString('description').replace(/\\n/g, '\n');
+        const roleMention = options.getRole('role_mention');
         const category = options.getChannel('category');
 
         if (category) {
@@ -500,28 +525,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setColor('#2b2d31');
 
         const row = new ActionRowBuilder();
+        const maxButtons = commandName === 'ticket-setup-1' ? 4 : 3;
 
-        for (let i = 1; i <= 5; i++) {
+        for (let i = 1; i <= maxButtons; i++) {
           const label = options.getString(`btn${i}_label`);
-          if (label) {
-            const role = options.getRole(`btn${i}_role`);
-            const roleId = role ? role.id : 'none';
-            const max = options.getInteger(`btn${i}_max`) || 6;
-            const points = options.getInteger(`btn${i}_points`) || 0;
+          if (!label) continue;
 
-            const btn = new ButtonBuilder()
-              .setCustomId(`tselect_${label.toLowerCase().replace(/\s+/g, '_')}_${max}_${points}_${roleId}`)
-              .setLabel(label)
-              .setStyle(i % 2 === 1 ? ButtonStyle.Primary : ButtonStyle.Secondary);
+          const emoji = options.getString(`btn${i}_emoji`);
+          const style = options.getString(`btn${i}_style`);
+          const max = options.getInteger(`btn${i}_max`) || 6;
+          const points = options.getInteger(`btn${i}_points`) || 0;
+          const roleIdStr = roleMention ? roleMention.id : 'none';
 
-            row.addComponents(btn);
-          }
+          const btn = new ButtonBuilder()
+            .setCustomId(`tselect_${label.toLowerCase().replace(/\s+/g, '_')}_${max}_${points}_${roleIdStr}`)
+            .setLabel(label)
+            .setStyle(parseButtonStyle(style));
+
+          if (emoji) btn.setEmoji(emoji);
+          row.addComponents(btn);
         }
 
         await channel.send({ embeds: [embed], components: [row] });
-        return await interaction.editReply('✅ Panel posted with roles configured!');
+        return await interaction.editReply(`✅ Panel posted to ${channel}!`);
       }
 
+      // Minimalist Dual Leaderboard
       if (commandName === 'leaderboard') {
         const sortedHelpers = [...helperPoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
         const sortedRequesters = [...userRequestCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -599,7 +628,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
 
           const sorted = [...roleRewards.entries()].sort((a, b) => a[0] - b[0]);
-          const rewardList = sorted.map(([pts, roleId]) => `• **${pts} Pts** $\\rightarrow$ <@&${roleId}>`).join('\n');
+          const rewardList = sorted.map(([pts, roleId]) => `• **${pts} Pts** -> <@&${roleId}>`).join('\n');
 
           const embed = new EmbedBuilder()
             .setTitle('🏅 Role Rewards')
@@ -611,22 +640,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
   } catch (error) {
-    console.error('Error handling interaction:', error);
+    console.error('Error:', error);
   }
 });
 
 // --- LOGIN ---
-if (!process.env.DISCORD_TOKEN) {
-  console.error('❌ DISCORD_TOKEN environment variable missing!');
-} else {
-  client.login(process.env.DISCORD_TOKEN).catch(err => {
-    console.error('❌ Login failed:', err.message);
-  });
-}
+client.login(process.env.DISCORD_TOKEN);
 
-// --- KEEP-ALIVE HTTP SERVER ---
-const PORT = process.env.PORT || 3000;
+// --- HTTP SERVER FOR KEEP-ALIVE ---
 http.createServer((req, res) => {
   res.write("Bot is alive!");
   res.end();
-}).listen(PORT, () => console.log(`🌐 Keep-alive server running on port ${PORT}`));
+}).listen(process.env.PORT || 3000);
