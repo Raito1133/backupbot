@@ -45,7 +45,7 @@ const roleRewards = new Map();
 const TICKET_PRESETS = {
   farming: { 
     label: 'Farming Assistance', 
-    max: 3, 
+    max: 6, 
     points: 3, 
     emoji: '<:queststart:1531490481991843862>', 
     roleIds: ['1529499059596038285'] 
@@ -80,14 +80,14 @@ const TICKET_PRESETS = {
   },
   boss_help: { 
     label: 'General Boss Help', 
-    max: 3, 
+    max: 6, 
     points: 2, 
     emoji: '<:AQW_sword:1531490097768304714>', 
     roleIds: ['1529499059596038285'] 
   },
   other_help: { 
     label: 'Other Requests', 
-    max: 4, 
+    max: 6, 
     points: 1, 
     emoji: '<:aqwScroll:1533349936438181908>', 
     roleIds: ['1529499059596038285'] 
