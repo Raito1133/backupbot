@@ -45,7 +45,7 @@ const roleRewards = new Map();
 const TICKET_PRESETS = {
   farming: { 
     label: 'Farming Assistance', 
-    max: 6, 
+    max: 3, 
     points: 3, 
     emoji: '<:queststart:1531490481991843862>', 
     roleIds: ['1529499059596038285'] 
@@ -80,21 +80,21 @@ const TICKET_PRESETS = {
   },
   boss_help: { 
     label: 'General Boss Help', 
-    max: 6, 
+    max: 3, 
     points: 2, 
     emoji: '<:AQW_sword:1531490097768304714>', 
     roleIds: ['1529499059596038285'] 
   },
   other_help: { 
     label: 'Other Requests', 
-    max: 6, 
+    max: 4, 
     points: 1, 
     emoji: '<:aqwScroll:1533349936438181908>', 
     roleIds: ['1529499059596038285'] 
   }
 };
 
-// Helper to calculate points based on custom value or fallback category/type
+// Helper to calculate points
 function getPointsForTicket(ticketData) {
   if (ticketData.customPoints !== undefined && ticketData.customPoints >= 0) {
     return ticketData.customPoints;
@@ -112,7 +112,7 @@ function getPointsForTicket(ticketData) {
   return 1;
 }
 
-// Helper function to check & assign auto-roles when points are updated
+// Helper function to check & assign auto-roles
 async function checkAndAssignHelperRoles(guild, userId, currentPoints) {
   try {
     const member = await guild.members.fetch(userId).catch(() => null);
@@ -272,7 +272,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setRequired(true);
 
       if (selectedKey === 'server_ticket') {
-        // Dedicated Concern Form for Server Support
         const subjectInput = new TextInputBuilder()
           .setCustomId('subject')
           .setLabel('SUBJECT')
@@ -293,7 +292,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           new ActionRowBuilder().addComponents(descInput)
         );
       } else {
-        // Standard AQW Assistance Form
         const serverInput = new TextInputBuilder()
           .setCustomId('server')
           .setLabel('Server')
@@ -362,14 +360,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const cfg = guildSettings.get(interaction.guild.id) || {};
         const chName = `ticket-${ticketType}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
 
+        // --- DYNAMIC PUBLIC / PRIVATE PERMISSIONS ---
+        const isServerTicket = ticketType === 'server_ticket';
+        const permissionOverwrites = [
+          { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+        ];
+
+        if (isServerTicket) {
+          // Strictly Private
+          permissionOverwrites.push({
+            id: interaction.guild.id,
+            deny: [PermissionsBitField.Flags.ViewChannel]
+          });
+        } else {
+          // Public: Everyone can see, but @everyone cannot send messages
+          permissionOverwrites.push({
+            id: interaction.guild.id,
+            allow: [PermissionsBitField.Flags.ViewChannel],
+            deny: [PermissionsBitField.Flags.SendMessages]
+          });
+        }
+
         const ticketChannel = await interaction.guild.channels.create({
           name: chName,
           type: ChannelType.GuildText,
           parent: cfg.ticketCategory || null,
-          permissionOverwrites: [
-            { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-            { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
-          ]
+          permissionOverwrites
         });
 
         activeTickets.set(ticketChannel.id, {
@@ -476,6 +492,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (customId === 'btn_claim') {
         if (!ticketData) return interaction.reply({ content: '❌ Ticket not found.', ephemeral: true });
+
+        // --- 🛑 FIX: PREVENT REQUESTER FROM ACCEPTING THEIR OWN TICKET ---
+        if (interaction.user.id === ticketData.requesterId) {
+          return interaction.reply({ 
+            content: '⚠️ You are the requester of this ticket! You do not need to accept it.', 
+            ephemeral: true 
+          });
+        }
 
         if (ticketData.helpers.includes(interaction.user.id)) {
           return interaction.reply({ content: '⚠️ You already accepted!', ephemeral: true });
