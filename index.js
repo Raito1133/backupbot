@@ -114,46 +114,39 @@ async function updateTicketEmbed(channel, ticketData) {
   }
 }
 
-// Helper builder function for adding button options dynamically
-function addButtonOptions(builder, count) {
-  for (let i = 1; i <= count; i++) {
+// Helper function to build setup commands cleanly
+function createSetupCommand(name, description, buttonCount) {
+  const cmd = new SlashCommandBuilder()
+    .setName(name)
+    .setDescription(description)
+    .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
+    .addStringOption(opt => opt.setName('title').setDescription('Embed title').setRequired(true))
+    .addStringOption(opt => opt.setName('description').setDescription('Embed description').setRequired(true))
+    .addRoleOption(opt => opt.setName('role_mention').setDescription('Role to ping on ticket creation').setRequired(false))
+    .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false));
+
+  for (let i = 1; i <= buttonCount; i++) {
     const isFirst = (i === 1);
-    builder
+    cmd
       .addStringOption(opt => opt.setName(`btn${i}_label`).setDescription(`Button ${i} Label`).setRequired(isFirst))
       .addStringOption(opt => opt.setName(`btn${i}_emoji`).setDescription(`Button ${i} Emoji`).setRequired(false))
       .addStringOption(opt => opt.setName(`btn${i}_style`).setDescription(`Button ${i} Style`).setRequired(false))
       .addIntegerOption(opt => opt.setName(`btn${i}_max`).setDescription(`Helper Limit (1-6)`).setMinValue(1).setMaxValue(6).setRequired(false))
       .addIntegerOption(opt => opt.setName(`btn${i}_points`).setDescription(`Points to award`).setMinValue(1).setRequired(false));
   }
-  return builder;
+
+  return cmd;
 }
 
 // --- SLASH COMMANDS REGISTRATION ---
-const setup1 = new SlashCommandBuilder()
-  .setName('ticket-setup-1')
-  .setDescription('Post setup panel 1 (up to 4 buttons)')
-  .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
-  .addStringOption(opt => opt.setName('title').setDescription('Embed title').setRequired(true))
-  .addStringOption(opt => opt.setName('description').setDescription('Embed description').setRequired(true))
-  .addRoleOption(opt => opt.setName('role_mention').setDescription('Role to ping on ticket creation').setRequired(false))
-  .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false));
-
-addButtonOptions(setup1, 4);
-
-const setup2 = new SlashCommandBuilder()
-  .setName('ticket-setup-2')
-  .setDescription('Post setup panel 2 (up to 3 buttons)')
-  .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
-  .addStringOption(opt => opt.setName('title').setDescription('Embed title').setRequired(true))
-  .addStringOption(opt => opt.setName('description').setDescription('Embed description').setRequired(true))
-  .addRoleOption(opt => opt.setName('role_mention').setDescription('Role to ping on ticket creation').setRequired(false))
-  .addChannelOption(opt => opt.setName('category').setDescription('Ticket Category').setRequired(false));
-
-addButtonOptions(setup2, 3);
+const setup1 = createSetupCommand('ticket-setup-1', 'Post setup panel 1 (Buttons 1 to 3)', 3);
+const setup2 = createSetupCommand('ticket-setup-2', 'Post setup panel 2 (Buttons 4 and 5)', 2);
+const setup3 = createSetupCommand('ticket-setup-3', 'Post setup panel 3 (Buttons 6 and 7)', 2);
 
 const commands = [
   setup1,
   setup2,
+  setup3,
 
   new SlashCommandBuilder()
     .setName('leaderboard')
@@ -205,6 +198,7 @@ async function registerCommands() {
       Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
     );
+    console.log('✅ All slash commands successfully registered!');
   } catch (error) {
     console.error('Error registering commands:', error);
   }
@@ -296,12 +290,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const rawMap = interaction.fields.getTextInputValue('map_name').trim();
         const description = interaction.fields.getTextInputValue('description');
 
-        // Room generation
         const cleanMap = rawMap.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
         const random4Digit = Math.floor(1000 + Math.random() * 9000);
         const room = `/join ${cleanMap}-${random4Digit}`;
 
-        // Increment requester stats
         const currentReqs = userRequestCounts.get(interaction.user.id) || 0;
         userRequestCounts.set(interaction.user.id, currentReqs + 1);
 
@@ -331,7 +323,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           helpers: []
         });
 
-        // Minimalist public embed
         const embed = new EmbedBuilder()
           .setTitle(`Ticket - ${ticketType}`)
           .addFields(
@@ -344,7 +335,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setColor('#2b2d31')
           .setTimestamp();
 
-        // Row 1: Active Actions
         const row1 = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('btn_location').setLabel('View Location').setStyle(ButtonStyle.Secondary).setEmoji('🚪'),
           new ButtonBuilder().setCustomId('btn_claim').setLabel('Accept').setStyle(ButtonStyle.Success).setEmoji('✅'),
@@ -352,13 +342,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
           new ButtonBuilder().setCustomId('btn_pinghelpers').setLabel('Ping').setStyle(ButtonStyle.Secondary).setEmoji('📢')
         );
 
-        // Row 2: Ticket Controls
         const row2 = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('btn_cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger),
           new ButtonBuilder().setCustomId('btn_complete').setLabel('Complete').setStyle(ButtonStyle.Primary)
         );
 
-        // Determine helper role mention from button config or global config
         const effectiveRoleId = pingRoleId || (HELPER_ROLE_ID !== 'YOUR_HELPER_ROLE_ID' ? HELPER_ROLE_ID : null);
         const helperRolePing = effectiveRoleId ? `<@&${effectiveRoleId}>` : '@Helper';
         
@@ -381,7 +369,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const ticketData = activeTickets.get(interaction.channel.id);
       const customId = interaction.customId;
 
-      // Single Location & Info Access
       if (customId === 'btn_location') {
         if (!ticketData) return interaction.reply({ content: '❌ Ticket not found.', ephemeral: true });
 
@@ -505,7 +492,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isChatInputCommand()) {
       const { commandName, options } = interaction;
 
-      if (commandName === 'ticket-setup-1' || commandName === 'ticket-setup-2') {
+      if (['ticket-setup-1', 'ticket-setup-2', 'ticket-setup-3'].includes(commandName)) {
         await interaction.deferReply({ ephemeral: true });
         const channel = options.getChannel('channel');
         const title = options.getString('title');
@@ -525,9 +512,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setColor('#2b2d31');
 
         const row = new ActionRowBuilder();
-        const maxButtons = commandName === 'ticket-setup-1' ? 4 : 3;
+        const maxButtonsInCmd = commandName === 'ticket-setup-1' ? 3 : 2;
 
-        for (let i = 1; i <= maxButtons; i++) {
+        for (let i = 1; i <= maxButtonsInCmd; i++) {
           const label = options.getString(`btn${i}_label`);
           if (!label) continue;
 
@@ -550,7 +537,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return await interaction.editReply(`✅ Panel posted to ${channel}!`);
       }
 
-      // Minimalist Dual Leaderboard
       if (commandName === 'leaderboard') {
         const sortedHelpers = [...helperPoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
         const sortedRequesters = [...userRequestCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
