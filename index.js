@@ -45,7 +45,7 @@ const roleRewards = new Map();
 const TICKET_PRESETS = {
   farming: { 
     label: 'Farming Assistance', 
-    max: 3, 
+    max: 6, 
     points: 3, 
     emoji: '<:queststart:1531490481991843862>', 
     roleIds: ['1529499059596038285'] 
@@ -80,14 +80,14 @@ const TICKET_PRESETS = {
   },
   boss_help: { 
     label: 'General Boss Help', 
-    max: 3, 
+    max: 6, 
     points: 2, 
     emoji: '<:AQW_sword:1531490097768304714>', 
     roleIds: ['1529499059596038285'] 
   },
   other_help: { 
     label: 'Other Requests', 
-    max: 4, 
+    max: 6, 
     points: 1, 
     emoji: '<:aqwScroll:1533349936438181908>', 
     roleIds: ['1529499059596038285'] 
@@ -144,14 +144,25 @@ async function updateTicketEmbed(channel, ticketData) {
     const maxLimit = ticketData.maxHelpers || 6;
 
     const oldEmbed = panelMsg.embeds[0];
-    const newEmbed = EmbedBuilder.from(oldEmbed).setFields(
+    const fields = [
       { name: 'Requester:', value: `<@${ticketData.requesterId}>`, inline: true },
-      { name: 'IGN:', value: `\`${ticketData.ign}\``, inline: true },
-      { name: 'Server:', value: `\`${ticketData.server}\``, inline: true },
-      { name: 'Details', value: ticketData.description },
-      { name: `👥 Helpers (${ticketData.helpers.length}/${maxLimit})`, value: helpersList }
-    );
+      { name: 'IGN:', value: `\`${ticketData.ign}\``, inline: true }
+    ];
 
+    if (ticketData.type === 'server_ticket') {
+      fields.push(
+        { name: 'Subject:', value: `\`${ticketData.subject}\``, inline: true },
+        { name: 'Description:', value: ticketData.description }
+      );
+    } else {
+      fields.push(
+        { name: 'Server:', value: `\`${ticketData.server}\``, inline: true },
+        { name: 'Details:', value: ticketData.description },
+        { name: `👥 Helpers (${ticketData.helpers.length}/${maxLimit})`, value: helpersList }
+      );
+    }
+
+    const newEmbed = EmbedBuilder.from(oldEmbed).setFields(fields);
     await panelMsg.edit({ embeds: [newEmbed] });
   } catch (err) {
     console.error('Failed to update ticket embed:', err);
@@ -231,7 +242,7 @@ client.once(Events.ClientReady, async () => {
   client.user.setPresence({
     status: 'dnd',
     activities: [{
-      name: 'AQW Leaderboard',
+      name: 'Sindria Ticket Helper',
       type: 5
     }]
   });
@@ -260,33 +271,57 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setStyle(TextInputStyle.Short)
         .setRequired(true);
 
-      const serverInput = new TextInputBuilder()
-        .setCustomId('server')
-        .setLabel('Server')
-        .setPlaceholder('Artix, Safiria, etc.')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
+      if (selectedKey === 'server_ticket') {
+        // Dedicated Concern Form for Server Support
+        const subjectInput = new TextInputBuilder()
+          .setCustomId('subject')
+          .setLabel('SUBJECT')
+          .setPlaceholder('Enter subject/concern...')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
 
-      const mapInput = new TextInputBuilder()
-        .setCustomId('map_name')
-        .setLabel('Map Name')
-        .setPlaceholder('ultraezrajal, timeinn, etc.')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
+        const descInput = new TextInputBuilder()
+          .setCustomId('description')
+          .setLabel('DESCRIPTION')
+          .setPlaceholder('Provide details about your concern...')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true);
 
-      const descInput = new TextInputBuilder()
-        .setCustomId('description')
-        .setLabel('Details / Bosses')
-        .setPlaceholder('Details on what you need help with...')
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true);
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(ignInput),
+          new ActionRowBuilder().addComponents(subjectInput),
+          new ActionRowBuilder().addComponents(descInput)
+        );
+      } else {
+        // Standard AQW Assistance Form
+        const serverInput = new TextInputBuilder()
+          .setCustomId('server')
+          .setLabel('Server')
+          .setPlaceholder('Artix, Safiria, etc.')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
 
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(ignInput),
-        new ActionRowBuilder().addComponents(serverInput),
-        new ActionRowBuilder().addComponents(mapInput),
-        new ActionRowBuilder().addComponents(descInput)
-      );
+        const mapInput = new TextInputBuilder()
+          .setCustomId('map_name')
+          .setLabel('Map Name')
+          .setPlaceholder('ultraezrajal, timeinn, etc.')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const descInput = new TextInputBuilder()
+          .setCustomId('description')
+          .setLabel('Details / Bosses')
+          .setPlaceholder('Details on what you need help with...')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true);
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(ignInput),
+          new ActionRowBuilder().addComponents(serverInput),
+          new ActionRowBuilder().addComponents(mapInput),
+          new ActionRowBuilder().addComponents(descInput)
+        );
+      }
 
       return await interaction.showModal(modal);
     }
@@ -305,13 +340,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const pingRoleIds = preset.roleIds || [HELPER_ROLE_ID];
 
         const ign = interaction.fields.getTextInputValue('ign');
-        const serverName = interaction.fields.getTextInputValue('server');
-        const rawMap = interaction.fields.getTextInputValue('map_name').trim();
         const description = interaction.fields.getTextInputValue('description');
 
-        const cleanMap = rawMap.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
-        const random4Digit = Math.floor(1000 + Math.random() * 9000);
-        const room = `/join ${cleanMap}-${random4Digit}`;
+        let serverName = 'N/A';
+        let room = 'N/A';
+        let subject = 'N/A';
+
+        if (ticketType === 'server_ticket') {
+          subject = interaction.fields.getTextInputValue('subject');
+        } else {
+          serverName = interaction.fields.getTextInputValue('server');
+          const rawMap = interaction.fields.getTextInputValue('map_name').trim();
+          const cleanMap = rawMap.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
+          const random4Digit = Math.floor(1000 + Math.random() * 9000);
+          room = `/join ${cleanMap}-${random4Digit}`;
+        }
 
         const currentReqs = userRequestCounts.get(interaction.user.id) || 0;
         userRequestCounts.set(interaction.user.id, currentReqs + 1);
@@ -335,6 +378,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           ign,
           server: serverName,
           room,
+          subject,
           description,
           maxHelpers,
           customPoints,
@@ -344,15 +388,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const embed = new EmbedBuilder()
           .setTitle(`Ticket - ${ticketType.replace(/_/g, ' ').toUpperCase()}`)
-          .addFields(
+          .setColor('#2b2d31')
+          .setTimestamp();
+
+        if (ticketType === 'server_ticket') {
+          embed.addFields(
+            { name: 'Requester:', value: `${interaction.user}`, inline: true },
+            { name: 'IGN:', value: `\`${ign}\``, inline: true },
+            { name: 'Subject:', value: `\`${subject}\``, inline: true },
+            { name: 'Description:', value: description }
+          );
+        } else {
+          embed.addFields(
             { name: 'Requester:', value: `${interaction.user}`, inline: true },
             { name: 'IGN:', value: `\`${ign}\``, inline: true },
             { name: 'Server:', value: `\`${serverName}\``, inline: true },
-            { name: 'Details', value: description },
+            { name: 'Details:', value: description },
             { name: `👥 Helpers (0/${maxHelpers})`, value: 'None' }
-          )
-          .setColor('#2b2d31')
-          .setTimestamp();
+          );
+        }
 
         let actionComponents = [];
 
@@ -441,10 +495,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
           content: `✅ ${interaction.user} joined the team. (${spotsLeft} left)`
         });
 
-        await interaction.reply({
-          content: `✅ **Accepted!** Room Info:\n📍 **Server:** \`${ticketData.server}\`\n📍 **Room:** \`${ticketData.room}\``,
-          ephemeral: true
-        });
+        if (ticketData.type === 'server_ticket') {
+          await interaction.reply({
+            content: `✅ **Accepted!** You are now assisting <@${ticketData.requesterId}> with their concern.`,
+            ephemeral: true
+          });
+        } else {
+          await interaction.reply({
+            content: `✅ **Accepted!** Room Info:\n📍 **Server:** \`${ticketData.server}\`\n📍 **Room:** \`${ticketData.room}\``,
+            ephemeral: true
+          });
+        }
 
         return updateTicketEmbed(interaction.channel, ticketData);
       }
