@@ -202,6 +202,17 @@ async function updateTicketEmbed(channel, ticketData) {
   }
 }
 
+// Format custom placeholder variables in embed strings
+function parseCustomPlaceholders(str, member, boostCount = 0) {
+  if (!str) return '';
+  return str
+    .replace(/{user}/g, `${member}`)
+    .replace(/{username}/g, member.user.username)
+    .replace(/{server}/g, member.guild.name)
+    .replace(/{boostCount}/g, boostCount)
+    .replace(/\\n/g, '\n');
+}
+
 // --- SLASH COMMANDS REGISTRATION ---
 const commands = [
   new SlashCommandBuilder()
@@ -214,12 +225,44 @@ const commands = [
     .addChannelOption(opt => opt.setName('log_channel').setDescription('Channel for Ticket Logs').setRequired(false)),
 
   new SlashCommandBuilder()
+    .setName('embed')
+    .setDescription('Create and send a fully customized embed message to a channel')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages)
+    .addChannelOption(opt => opt.setName('channel').setDescription('Channel to send the embed').setRequired(true))
+    .addStringOption(opt => opt.setName('title').setDescription('Embed Title').setRequired(true))
+    .addStringOption(opt => opt.setName('description').setDescription('Embed Description (Use \\n for new lines)').setRequired(true))
+    .addStringOption(opt => opt.setName('color').setDescription('Hex color code (e.g. #2b2d31 or #ff0000)').setRequired(false))
+    .addStringOption(opt => opt.setName('image_url').setDescription('Large banner image URL').setRequired(false))
+    .addStringOption(opt => opt.setName('thumbnail_url').setDescription('Small thumbnail image URL').setRequired(false))
+    .addStringOption(opt => opt.setName('footer').setDescription('Footer text at the bottom').setRequired(false)),
+
+  new SlashCommandBuilder()
     .setName('setup-channels')
     .setDescription('Configure server channels for logs, welcome messages, and server boosts')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
     .addChannelOption(opt => opt.setName('log_channel').setDescription('Channel for ticket activity logs').setRequired(false))
     .addChannelOption(opt => opt.setName('welcome_channel').setDescription('Channel for welcome embeds').setRequired(false))
     .addChannelOption(opt => opt.setName('boost_channel').setDescription('Channel for server boost embeds').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('set-welcome-embed')
+    .setDescription('Customize the welcome embed message')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
+    .addStringOption(opt => opt.setName('title').setDescription('Embed Title').setRequired(true))
+    .addStringOption(opt => opt.setName('description').setDescription('Use {user}, {username}, {server}. Use \\n for new line.').setRequired(true))
+    .addStringOption(opt => opt.setName('image_url').setDescription('Banner image URL').setRequired(false))
+    .addStringOption(opt => opt.setName('thumbnail_url').setDescription('Thumbnail image URL (Leave blank for user avatar)').setRequired(false))
+    .addStringOption(opt => opt.setName('color').setDescription('Hex color code (e.g. #2b2d31)').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('set-boost-embed')
+    .setDescription('Customize the server boost embed message')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
+    .addStringOption(opt => opt.setName('title').setDescription('Embed Title').setRequired(true))
+    .addStringOption(opt => opt.setName('description').setDescription('Use {user}, {username}, {server}, {boostCount}. Use \\n for new line.').setRequired(true))
+    .addStringOption(opt => opt.setName('image_url').setDescription('Banner image URL').setRequired(false))
+    .addStringOption(opt => opt.setName('thumbnail_url').setDescription('Thumbnail image URL (Leave blank for user avatar)').setRequired(false))
+    .addStringOption(opt => opt.setName('color').setDescription('Hex color code (e.g. #f47fff)').setRequired(false)),
 
   new SlashCommandBuilder()
     .setName('leaderboard')
@@ -304,12 +347,19 @@ client.on(Events.GuildMemberAdd, async (member) => {
     const welcomeChannel = member.guild.channels.cache.get(welcomeChannelId);
     if (!welcomeChannel) return;
 
+    const customEmbed = cfg.welcomeEmbed || {};
+    const title = parseCustomPlaceholders(customEmbed.title || `Welcome to ${member.guild.name}!`, member);
+    const desc = parseCustomPlaceholders(customEmbed.description || `Hey {user}, welcome to the server! We are glad to have you here.\n\nBe sure to check out our ticket system if you need gameplay assistance or support!`, member);
+    const image = customEmbed.image || 'https://i.imgur.com/8Q9Z5Yw.png';
+    const thumbnail = customEmbed.thumbnail || member.user.displayAvatarURL({ dynamic: true });
+    const color = customEmbed.color || '#2b2d31';
+
     const welcomeEmbed = new EmbedBuilder()
-      .setTitle(`Welcome to ${member.guild.name}!`)
-      .setDescription(`Hey ${member}, welcome to the server! We are glad to have you here.\n\nBe sure to check out our ticket system if you need gameplay assistance or support!`)
-      .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-      .setImage('https://i.imgur.com/8Q9Z5Yw.png') // Replace with your banner image URL
-      .setColor('#2b2d31')
+      .setTitle(title)
+      .setDescription(desc)
+      .setThumbnail(thumbnail)
+      .setImage(image)
+      .setColor(color)
       .setTimestamp();
 
     await welcomeChannel.send({ content: `Welcome ${member}!`, embeds: [welcomeEmbed] });
@@ -335,13 +385,23 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
       if (!boostChannel) return;
 
       const boostCount = newMember.guild.premiumSubscriptionCount || 0;
+      const customEmbed = cfg.boostEmbed || {};
+
+      const title = parseCustomPlaceholders(customEmbed.title || '🚀 Server Boost Received!', newMember, boostCount);
+      const desc = parseCustomPlaceholders(customEmbed.description || `Thank you **{username}** for boosting the server!\n\n{user} just boosted! We now have **{boostCount}** total boosts! 🎉`, newMember, boostCount);
+      const thumbnail = customEmbed.thumbnail || newMember.user.displayAvatarURL({ dynamic: true });
+      const color = customEmbed.color || '#f47fff';
 
       const boostEmbed = new EmbedBuilder()
-        .setTitle('🚀 Server Boost Received!')
-        .setDescription(`Thank you **${newMember.user.username}** for boosting the server!\n\n${newMember} just boosted! We now have **${boostCount}** total boosts! 🎉`)
-        .setColor('#f47fff')
-        .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
+        .setTitle(title)
+        .setDescription(desc)
+        .setColor(color)
+        .setThumbnail(thumbnail)
         .setTimestamp();
+
+      if (customEmbed.image) {
+        boostEmbed.setImage(customEmbed.image);
+      }
 
       await boostChannel.send({ embeds: [boostEmbed] });
     } catch (err) {
@@ -696,6 +756,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         await interaction.deferReply();
 
+        // Lock channel
         await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
 
         if (ticketData) {
@@ -723,7 +784,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const embed = new EmbedBuilder()
           .setTitle('🔒 Ticket Completed')
-          .setDescription(`Resolved and closed!${awardedText}`)
+          .setDescription(`Resolved successfully!${awardedText}\n\n*This channel will automatically delete in 5 seconds...*`)
           .setColor('#2ecc71')
           .setTimestamp();
 
@@ -739,7 +800,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
         );
 
         await interaction.editReply({ embeds: [embed] });
+
+        // Auto Delete Channel After 5 seconds
         activeTickets.delete(interaction.channel.id);
+        setTimeout(() => {
+          interaction.channel.delete().catch(() => {});
+        }, 5000);
+
         return;
       }
     }
@@ -784,6 +851,36 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return await interaction.editReply(`✅ Unified 7-option panel posted to ${channel}!`);
       }
 
+      if (commandName === 'embed') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const channel = options.getChannel('channel');
+        const title = options.getString('title');
+        const desc = options.getString('description').replace(/\\n/g, '\n');
+        const color = options.getString('color') || '#2b2d31';
+        const image = options.getString('image_url');
+        const thumbnail = options.getString('thumbnail_url');
+        const footer = options.getString('footer');
+
+        try {
+          const customEmbed = new EmbedBuilder()
+            .setTitle(title)
+            .setDescription(desc)
+            .setColor(color)
+            .setTimestamp();
+
+          if (image) customEmbed.setImage(image);
+          if (thumbnail) customEmbed.setThumbnail(thumbnail);
+          if (footer) customEmbed.setFooter({ text: footer });
+
+          await channel.send({ embeds: [customEmbed] });
+          return await interaction.editReply(`✅ Custom embed successfully posted to ${channel}!`);
+        } catch (err) {
+          console.error('Error posting custom embed:', err);
+          return await interaction.editReply(`❌ Failed to post embed: ${err.message}`);
+        }
+      }
+
       if (commandName === 'setup-channels') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -810,6 +907,40 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         return await interaction.editReply(`✅ **Configured Channels:**\n${statusUpdates.join('\n')}`);
+      }
+
+      if (commandName === 'set-welcome-embed') {
+        const title = options.getString('title');
+        const desc = options.getString('description');
+        const image = options.getString('image_url');
+        const thumbnail = options.getString('thumbnail_url');
+        const color = options.getString('color');
+
+        const cfg = guildSettings.get(interaction.guild.id) || {};
+        cfg.welcomeEmbed = { title, description: desc, image, thumbnail, color };
+        guildSettings.set(interaction.guild.id, cfg);
+
+        return await interaction.reply({
+          content: '✅ **Welcome embed settings updated!** New members will now receive your custom embed message.',
+          ephemeral: true
+        });
+      }
+
+      if (commandName === 'set-boost-embed') {
+        const title = options.getString('title');
+        const desc = options.getString('description');
+        const image = options.getString('image_url');
+        const thumbnail = options.getString('thumbnail_url');
+        const color = options.getString('color');
+
+        const cfg = guildSettings.get(interaction.guild.id) || {};
+        cfg.boostEmbed = { title, description: desc, image, thumbnail, color };
+        guildSettings.set(interaction.guild.id, cfg);
+
+        return await interaction.reply({
+          content: '✅ **Server boost embed settings updated!** Boost announcements will now use your custom embed layout.',
+          ephemeral: true
+        });
       }
 
       if (commandName === 'leaderboard') {
