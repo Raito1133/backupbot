@@ -23,6 +23,7 @@ const http = require('http');
 // --- ⚠️ CONFIGURATION ⚠️ ---
 const GUILD_ID = '1371775026264670228'; // Server ID
 const HELPER_ROLE_ID = 'YOUR_HELPER_ROLE_ID'; // Fallback Helper Role ID
+const DEFAULT_VERIFY_CHANNEL_ID = '1531294593780416743';
 
 const client = new Client({
   intents: [
@@ -203,13 +204,14 @@ async function updateTicketEmbed(channel, ticketData) {
 }
 
 // Format custom placeholder variables in embed strings
-function parseCustomPlaceholders(str, member, boostCount = 0) {
+function parseCustomPlaceholders(str, member, boostCount = 0, verifyChannelId = DEFAULT_VERIFY_CHANNEL_ID) {
   if (!str) return '';
   return str
     .replace(/{user}/g, `${member}`)
     .replace(/{username}/g, member.user.username)
     .replace(/{server}/g, member.guild.name)
     .replace(/{boostCount}/g, boostCount)
+    .replace(/{verifyChannel}/g, `<#${verifyChannelId}>`)
     .replace(/\\n/g, '\n');
 }
 
@@ -246,22 +248,27 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('set-welcome-embed')
-    .setDescription('Customize the welcome embed message')
+    .setDescription('Customize the welcome message and embed')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
     .addStringOption(opt => opt.setName('title').setDescription('Embed Title').setRequired(true))
-    .addStringOption(opt => opt.setName('description').setDescription('Use {user}, {username}, {server}. Use \\n for new line.').setRequired(true))
+    .addStringOption(opt => opt.setName('description').setDescription('Vars: {user}, {username}, {server}, {verifyChannel}').setRequired(true))
+    .addStringOption(opt => opt.setName('message').setDescription('Message OUTSIDE embed to ping user (e.g., Welcome {user}!)').setRequired(false))
+    .addStringOption(opt => opt.setName('footer').setDescription('Footer text inside the embed').setRequired(false))
+    .addChannelOption(opt => opt.setName('verify_channel').setDescription('Channel where members must verify first').setRequired(false))
     .addStringOption(opt => opt.setName('image_url').setDescription('Banner image URL').setRequired(false))
-    .addStringOption(opt => opt.setName('thumbnail_url').setDescription('Thumbnail image URL (Leave blank for user avatar)').setRequired(false))
+    .addStringOption(opt => opt.setName('thumbnail_url').setDescription('Thumbnail image URL').setRequired(false))
     .addStringOption(opt => opt.setName('color').setDescription('Hex color code (e.g. #2b2d31)').setRequired(false)),
 
   new SlashCommandBuilder()
     .setName('set-boost-embed')
-    .setDescription('Customize the server boost embed message')
+    .setDescription('Customize the server boost message and embed')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
     .addStringOption(opt => opt.setName('title').setDescription('Embed Title').setRequired(true))
-    .addStringOption(opt => opt.setName('description').setDescription('Use {user}, {username}, {server}, {boostCount}. Use \\n for new line.').setRequired(true))
+    .addStringOption(opt => opt.setName('description').setDescription('Vars: {user}, {username}, {server}, {boostCount}').setRequired(true))
+    .addStringOption(opt => opt.setName('message').setDescription('Message OUTSIDE embed to ping user').setRequired(false))
+    .addStringOption(opt => opt.setName('footer').setDescription('Footer text inside the embed').setRequired(false))
     .addStringOption(opt => opt.setName('image_url').setDescription('Banner image URL').setRequired(false))
-    .addStringOption(opt => opt.setName('thumbnail_url').setDescription('Thumbnail image URL (Leave blank for user avatar)').setRequired(false))
+    .addStringOption(opt => opt.setName('thumbnail_url').setDescription('Thumbnail image URL').setRequired(false))
     .addStringOption(opt => opt.setName('color').setDescription('Hex color code (e.g. #f47fff)').setRequired(false)),
 
   new SlashCommandBuilder()
@@ -348,8 +355,18 @@ client.on(Events.GuildMemberAdd, async (member) => {
     if (!welcomeChannel) return;
 
     const customEmbed = cfg.welcomeEmbed || {};
-    const title = parseCustomPlaceholders(customEmbed.title || `Welcome to ${member.guild.name}!`, member);
-    const desc = parseCustomPlaceholders(customEmbed.description || `Hey {user}, welcome to the server! We are glad to have you here.\n\nBe sure to check out our ticket system if you need gameplay assistance or support!`, member);
+    const verifyChanId = customEmbed.verifyChannelId || DEFAULT_VERIFY_CHANNEL_ID;
+
+    const defaultDesc = `Hey {user}, welcome to **{server}**! 🎉\n\n📌 **First Step:** Please verify your account in {verifyChannel} first to gain access to the rest of the server.\n\n🎫 **Need Help?** After verifying, check out our ticket system if you need gameplay assistance or support!`;
+
+    const title = parseCustomPlaceholders(customEmbed.title || `Welcome to ${member.guild.name}!`, member, 0, verifyChanId);
+    const desc = parseCustomPlaceholders(customEmbed.description || defaultDesc, member, 0, verifyChanId);
+    
+    // Message OUTSIDE embed to ping user
+    const contentMessage = customEmbed.outerMessage 
+      ? parseCustomPlaceholders(customEmbed.outerMessage, member, 0, verifyChanId) 
+      : `Welcome ${member}!`;
+
     const image = customEmbed.image || 'https://i.imgur.com/8Q9Z5Yw.png';
     const thumbnail = customEmbed.thumbnail || member.user.displayAvatarURL({ dynamic: true });
     const color = customEmbed.color || '#2b2d31';
@@ -362,8 +379,11 @@ client.on(Events.GuildMemberAdd, async (member) => {
       .setColor(color)
       .setTimestamp();
 
-    // Sends explicit ping outside the embed to trigger client notifications
-    await welcomeChannel.send({ content: `${member}`, embeds: [welcomeEmbed] });
+    if (customEmbed.footer) {
+      welcomeEmbed.setFooter({ text: parseCustomPlaceholders(customEmbed.footer, member, 0, verifyChanId) });
+    }
+
+    await welcomeChannel.send({ content: contentMessage, embeds: [welcomeEmbed] });
   } catch (err) {
     console.error('Error sending welcome message:', err);
   }
@@ -390,6 +410,11 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
 
       const title = parseCustomPlaceholders(customEmbed.title || '🚀 Server Boost Received!', newMember, boostCount);
       const desc = parseCustomPlaceholders(customEmbed.description || `Thank you **{username}** for boosting the server!\n\n{user} just boosted! We now have **{boostCount}** total boosts! 🎉`, newMember, boostCount);
+      
+      const contentMessage = customEmbed.outerMessage 
+        ? parseCustomPlaceholders(customEmbed.outerMessage, newMember, boostCount) 
+        : `Thank you for boosting ${newMember}!`;
+
       const thumbnail = customEmbed.thumbnail || newMember.user.displayAvatarURL({ dynamic: true });
       const color = customEmbed.color || '#f47fff';
 
@@ -404,8 +429,11 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
         boostEmbed.setImage(customEmbed.image);
       }
 
-      // Sends explicit ping outside the embed to trigger client notifications
-      await boostChannel.send({ content: `${newMember}`, embeds: [boostEmbed] });
+      if (customEmbed.footer) {
+        boostEmbed.setFooter({ text: parseCustomPlaceholders(customEmbed.footer, newMember, boostCount) });
+      }
+
+      await boostChannel.send({ content: contentMessage, embeds: [boostEmbed] });
     } catch (err) {
       console.error('Error sending boost message:', err);
     }
@@ -914,16 +942,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (commandName === 'set-welcome-embed') {
         const title = options.getString('title');
         const desc = options.getString('description');
+        const outerMessage = options.getString('message');
+        const footer = options.getString('footer');
+        const verifyChannel = options.getChannel('verify_channel');
         const image = options.getString('image_url');
         const thumbnail = options.getString('thumbnail_url');
         const color = options.getString('color');
 
         const cfg = guildSettings.get(interaction.guild.id) || {};
-        cfg.welcomeEmbed = { title, description: desc, image, thumbnail, color };
+        cfg.welcomeEmbed = {
+          title,
+          description: desc,
+          outerMessage,
+          footer,
+          verifyChannelId: verifyChannel ? verifyChannel.id : DEFAULT_VERIFY_CHANNEL_ID,
+          image,
+          thumbnail,
+          color
+        };
         guildSettings.set(interaction.guild.id, cfg);
 
         return await interaction.reply({
-          content: '✅ **Welcome embed settings updated!** New members will now receive your custom embed message.',
+          content: '✅ **Welcome embed settings updated!**',
           ephemeral: true
         });
       }
@@ -931,16 +971,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (commandName === 'set-boost-embed') {
         const title = options.getString('title');
         const desc = options.getString('description');
+        const outerMessage = options.getString('message');
+        const footer = options.getString('footer');
         const image = options.getString('image_url');
         const thumbnail = options.getString('thumbnail_url');
         const color = options.getString('color');
 
         const cfg = guildSettings.get(interaction.guild.id) || {};
-        cfg.boostEmbed = { title, description: desc, image, thumbnail, color };
+        cfg.boostEmbed = { title, description: desc, outerMessage, footer, image, thumbnail, color };
         guildSettings.set(interaction.guild.id, cfg);
 
         return await interaction.reply({
-          content: '✅ **Server boost embed settings updated!** Boost announcements will now use your custom embed layout.',
+          content: '✅ **Server boost embed settings updated!**',
           ephemeral: true
         });
       }
