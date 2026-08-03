@@ -233,6 +233,7 @@ const commands = [
     .addChannelOption(opt => opt.setName('channel').setDescription('Channel to send the embed').setRequired(true))
     .addStringOption(opt => opt.setName('title').setDescription('Embed Title').setRequired(true))
     .addStringOption(opt => opt.setName('description').setDescription('Embed Description (Use \\n for new lines)').setRequired(true))
+    .addStringOption(opt => opt.setName('outer_message').setDescription('Message OUTSIDE/above the embed (e.g. pings)').setRequired(false))
     .addStringOption(opt => opt.setName('color').setDescription('Hex color code (e.g. #2b2d31 or #ff0000)').setRequired(false))
     .addStringOption(opt => opt.setName('image_url').setDescription('Large banner image URL').setRequired(false))
     .addStringOption(opt => opt.setName('thumbnail_url').setDescription('Small thumbnail image URL').setRequired(false))
@@ -887,6 +888,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const channel = options.getChannel('channel');
         const title = options.getString('title');
         const desc = options.getString('description').replace(/\\n/g, '\n');
+        const rawOuterMessage = options.getString('outer_message');
         const color = options.getString('color') || '#2b2d31';
         const image = options.getString('image_url');
         const thumbnail = options.getString('thumbnail_url');
@@ -903,7 +905,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           if (thumbnail) customEmbed.setThumbnail(thumbnail);
           if (footer) customEmbed.setFooter({ text: footer });
 
-          await channel.send({ embeds: [customEmbed] });
+          const messageOptions = { embeds: [customEmbed] };
+          if (rawOuterMessage) {
+            messageOptions.content = rawOuterMessage.replace(/\\n/g, '\n');
+          }
+
+          await channel.send(messageOptions);
           return await interaction.editReply(`✅ Custom embed successfully posted to ${channel}!`);
         } catch (err) {
           console.error('Error posting custom embed:', err);
