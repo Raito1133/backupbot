@@ -362,7 +362,8 @@ client.on(Events.GuildMemberAdd, async (member) => {
       .setColor(color)
       .setTimestamp();
 
-    await welcomeChannel.send({ content: `Welcome ${member}!`, embeds: [welcomeEmbed] });
+    // Sends explicit ping outside the embed to trigger client notifications
+    await welcomeChannel.send({ content: `${member}`, embeds: [welcomeEmbed] });
   } catch (err) {
     console.error('Error sending welcome message:', err);
   }
@@ -403,7 +404,8 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
         boostEmbed.setImage(customEmbed.image);
       }
 
-      await boostChannel.send({ embeds: [boostEmbed] });
+      // Sends explicit ping outside the embed to trigger client notifications
+      await boostChannel.send({ content: `${newMember}`, embeds: [boostEmbed] });
     } catch (err) {
       console.error('Error sending boost message:', err);
     }
