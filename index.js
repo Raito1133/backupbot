@@ -94,6 +94,39 @@ const TICKET_PRESETS = {
   }
 };
 
+// Helper to send ticket log embeds
+async function sendTicketLog(guild, title, description, color = '#2b2d31', fields = []) {
+  try {
+    const cfg = guildSettings.get(guild.id) || {};
+    const logChannelId = cfg.logChannelId;
+    if (!logChannelId) return;
+
+    const logChannel = guild.channels.cache.get(logChannelId);
+    if (!logChannel) return;
+
+    const logEmbed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(description)
+      .addFields(fields)
+      .setColor(color)
+      .setTimestamp();
+
+    await logChannel.send({ embeds: [logEmbed] });
+  } catch (err) {
+    console.error('Failed to send ticket log:', err);
+  }
+}
+
+// Helper to check if helper is already in another ticket
+function isHelperInActiveTicket(userId) {
+  for (const [channelId, ticket] of activeTickets.entries()) {
+    if (ticket.helpers.includes(userId)) {
+      return channelId;
+    }
+  }
+  return null;
+}
+
 // Helper to calculate points
 function getPointsForTicket(ticketData) {
   if (ticketData.customPoints !== undefined && ticketData.customPoints >= 0) {
@@ -177,11 +210,20 @@ const commands = [
     .addChannelOption(opt => opt.setName('channel').setDescription('Channel to post panel').setRequired(true))
     .addStringOption(opt => opt.setName('title').setDescription('Embed Title').setRequired(true))
     .addStringOption(opt => opt.setName('description').setDescription('Embed Description').setRequired(true))
-    .addChannelOption(opt => opt.setName('category').setDescription('Ticket Channel Category').setRequired(false)),
+    .addChannelOption(opt => opt.setName('category').setDescription('Ticket Channel Category').setRequired(false))
+    .addChannelOption(opt => opt.setName('log_channel').setDescription('Channel for Ticket Logs').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('setup-channels')
+    .setDescription('Configure server channels for logs, welcome messages, and server boosts')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
+    .addChannelOption(opt => opt.setName('log_channel').setDescription('Channel for ticket activity logs').setRequired(false))
+    .addChannelOption(opt => opt.setName('welcome_channel').setDescription('Channel for welcome embeds').setRequired(false))
+    .addChannelOption(opt => opt.setName('boost_channel').setDescription('Channel for server boost embeds').setRequired(false)),
 
   new SlashCommandBuilder()
     .setName('leaderboard')
-    .setDescription('View top helpers and top requesters'),
+    .setDescription('View top 20 helpers and top 20 requesters'),
 
   new SlashCommandBuilder()
     .setName('points')
@@ -248,6 +290,64 @@ client.once(Events.ClientReady, async () => {
   });
 
   await registerCommands();
+});
+
+// --- WELCOME EMBED LISTENER ---
+client.on(Events.GuildMemberAdd, async (member) => {
+  if (member.guild.id !== GUILD_ID) return;
+
+  try {
+    const cfg = guildSettings.get(member.guild.id) || {};
+    const welcomeChannelId = cfg.welcomeChannelId;
+    if (!welcomeChannelId) return;
+
+    const welcomeChannel = member.guild.channels.cache.get(welcomeChannelId);
+    if (!welcomeChannel) return;
+
+    const welcomeEmbed = new EmbedBuilder()
+      .setTitle(`Welcome to ${member.guild.name}!`)
+      .setDescription(`Hey ${member}, welcome to the server! We are glad to have you here.\n\nBe sure to check out our ticket system if you need gameplay assistance or support!`)
+      .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+      .setImage('https://i.imgur.com/8Q9Z5Yw.png') // Replace with your banner image URL
+      .setColor('#2b2d31')
+      .setTimestamp();
+
+    await welcomeChannel.send({ content: `Welcome ${member}!`, embeds: [welcomeEmbed] });
+  } catch (err) {
+    console.error('Error sending welcome message:', err);
+  }
+});
+
+// --- BOOST EMBED LISTENER ---
+client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
+  if (newMember.guild.id !== GUILD_ID) return;
+
+  const wasBoosting = oldMember.premiumSince;
+  const isBoosting = newMember.premiumSince;
+
+  if (!wasBoosting && isBoosting) {
+    try {
+      const cfg = guildSettings.get(newMember.guild.id) || {};
+      const boostChannelId = cfg.boostChannelId;
+      if (!boostChannelId) return;
+
+      const boostChannel = newMember.guild.channels.cache.get(boostChannelId);
+      if (!boostChannel) return;
+
+      const boostCount = newMember.guild.premiumSubscriptionCount || 0;
+
+      const boostEmbed = new EmbedBuilder()
+        .setTitle('🚀 Server Boost Received!')
+        .setDescription(`Thank you **${newMember.user.username}** for boosting the server!\n\n${newMember} just boosted! We now have **${boostCount}** total boosts! 🎉`)
+        .setColor('#f47fff')
+        .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
+        .setTimestamp();
+
+      await boostChannel.send({ embeds: [boostEmbed] });
+    } catch (err) {
+      console.error('Error sending boost message:', err);
+    }
+  }
 });
 
 // --- INTERACTION HANDLER ---
@@ -350,12 +450,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
           serverName = interaction.fields.getTextInputValue('server');
           const rawMap = interaction.fields.getTextInputValue('map_name').trim();
           const cleanMap = rawMap.toLowerCase().replace(/[^a-z0-9]/g, '') || 'room';
-          const random4Digit = Math.floor(1000 + Math.random() * 9000);
-          room = `/join ${cleanMap}-${random4Digit}`;
+          room = `/join ${cleanMap}`;
         }
-
-        const currentReqs = userRequestCounts.get(interaction.user.id) || 0;
-        userRequestCounts.set(interaction.user.id, currentReqs + 1);
 
         const cfg = guildSettings.get(interaction.guild.id) || {};
         const chName = `ticket-${ticketType}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
@@ -367,13 +463,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         ];
 
         if (isServerTicket) {
-          // Strictly Private
           permissionOverwrites.push({
             id: interaction.guild.id,
             deny: [PermissionsBitField.Flags.ViewChannel]
           });
         } else {
-          // Public: Everyone can see, but @everyone cannot send messages
           permissionOverwrites.push({
             id: interaction.guild.id,
             allow: [PermissionsBitField.Flags.ViewChannel],
@@ -458,6 +552,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
         await mainMsg.pin().catch(() => {});
 
+        // --- TICKET CREATION LOG ---
+        await sendTicketLog(
+          interaction.guild,
+          '📩 Ticket Created',
+          `**Category:** \`${ticketType}\`\n**User:** ${interaction.user} (\`${interaction.user.id}\`)\n**Channel:** ${ticketChannel}`,
+          '#3498db'
+        );
+
         return await interaction.editReply(`✅ Ticket created: ${ticketChannel}`);
       } catch (err) {
         console.error('Failed to create ticket channel:', err);
@@ -485,7 +587,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         return interaction.reply({
-          content: `📍 **Private Location Details:**\n• **IGN:** \`${ticketData.ign}\`\n• **Server:** \`${ticketData.server}\`\n• **Room:** \`${ticketData.room}\``,
+          content: `📍 **Private Location Details:**\n• **IGN:** \`${ticketData.ign}\`\n• **Server:** \`${ticketData.server}\`\n• **Command:** \`${ticketData.room}\``,
           ephemeral: true
         });
       }
@@ -493,7 +595,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (customId === 'btn_claim') {
         if (!ticketData) return interaction.reply({ content: '❌ Ticket not found.', ephemeral: true });
 
-        // --- 🛑 FIX: PREVENT REQUESTER FROM ACCEPTING THEIR OWN TICKET ---
         if (interaction.user.id === ticketData.requesterId) {
           return interaction.reply({ 
             content: '⚠️ You are the requester of this ticket! You do not need to accept it.', 
@@ -503,6 +604,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         if (ticketData.helpers.includes(interaction.user.id)) {
           return interaction.reply({ content: '⚠️ You already accepted!', ephemeral: true });
+        }
+
+        const activeChannelId = isHelperInActiveTicket(interaction.user.id);
+        if (activeChannelId) {
+          return interaction.reply({
+            content: `⚠️ You are already handling an active ticket (<#${activeChannelId}>)! Finish that ticket before accepting another one.`,
+            ephemeral: true
+          });
         }
 
         const maxAllowed = ticketData.maxHelpers || 6;
@@ -519,6 +628,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
           content: `✅ ${interaction.user} joined the team. (${spotsLeft} left)`
         });
 
+        await sendTicketLog(
+          interaction.guild,
+          '🤝 Ticket Accepted',
+          `**Helper:** ${interaction.user} (\`${interaction.user.id}\`)\n**Ticket:** ${interaction.channel}\n**Requester:** <@${ticketData.requesterId}>`,
+          '#f1c40f'
+        );
+
         if (ticketData.type === 'server_ticket') {
           await interaction.reply({
             content: `✅ **Accepted!** You are now assisting <@${ticketData.requesterId}> with their concern.`,
@@ -526,7 +642,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
         } else {
           await interaction.reply({
-            content: `✅ **Accepted!** Room Info:\n📍 **Server:** \`${ticketData.server}\`\n📍 **Room:** \`${ticketData.room}\``,
+            content: `✅ **Accepted!** Room Info:\n📍 **Server:** \`${ticketData.server}\`\n📍 **Command:** \`${ticketData.room}\``,
             ephemeral: true
           });
         }
@@ -560,6 +676,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         await interaction.reply('❌ Closed. Deleting in 3s...');
+
+        await sendTicketLog(
+          interaction.guild,
+          '🚫 Ticket Canceled',
+          `**Canceled By:** ${interaction.user} (\`${interaction.user.id}\`)\n**Channel:** \`#${interaction.channel.name}\``,
+          '#e74c3c'
+        );
+
         activeTickets.delete(interaction.channel.id);
         setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
         return;
@@ -573,6 +697,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.deferReply();
 
         await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
+
+        if (ticketData) {
+          const currentReqs = userRequestCounts.get(ticketData.requesterId) || 0;
+          userRequestCounts.set(ticketData.requesterId, currentReqs + 1);
+        }
 
         let awardedText = '';
         if (ticketData && ticketData.helpers.length > 0) {
@@ -598,6 +727,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setColor('#2ecc71')
           .setTimestamp();
 
+        const helperMentionsLog = ticketData && ticketData.helpers.length > 0
+          ? ticketData.helpers.map(id => `<@${id}>`).join(', ')
+          : 'None';
+
+        await sendTicketLog(
+          interaction.guild,
+          '✅ Ticket Completed',
+          `**Requester:** <@${ticketData.requesterId}>\n**Helpers:** ${helperMentionsLog}\n**Points Awarded:** \`${getPointsForTicket(ticketData)}\`\n**Channel:** \`#${interaction.channel.name}\``,
+          '#2ecc71'
+        );
+
         await interaction.editReply({ embeds: [embed] });
         activeTickets.delete(interaction.channel.id);
         return;
@@ -614,12 +754,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const title = options.getString('title');
         const desc = options.getString('description').replace(/\\n/g, '\n');
         const category = options.getChannel('category');
+        const logChannel = options.getChannel('log_channel');
 
-        if (category) {
-          const cfg = guildSettings.get(interaction.guild.id) || {};
-          cfg.ticketCategory = category.id;
-          guildSettings.set(interaction.guild.id, cfg);
-        }
+        const cfg = guildSettings.get(interaction.guild.id) || {};
+        if (category) cfg.ticketCategory = category.id;
+        if (logChannel) cfg.logChannelId = logChannel.id;
+        guildSettings.set(interaction.guild.id, cfg);
 
         const embed = new EmbedBuilder()
           .setTitle(title)
@@ -644,9 +784,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return await interaction.editReply(`✅ Unified 7-option panel posted to ${channel}!`);
       }
 
+      if (commandName === 'setup-channels') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const logChannel = options.getChannel('log_channel');
+        const welcomeChannel = options.getChannel('welcome_channel');
+        const boostChannel = options.getChannel('boost_channel');
+
+        const cfg = guildSettings.get(interaction.guild.id) || {};
+
+        if (logChannel) cfg.logChannelId = logChannel.id;
+        if (welcomeChannel) cfg.welcomeChannelId = welcomeChannel.id;
+        if (boostChannel) cfg.boostChannelId = boostChannel.id;
+
+        guildSettings.set(interaction.guild.id, cfg);
+
+        const statusUpdates = [
+          logChannel ? `• **Log Channel:** ${logChannel}` : null,
+          welcomeChannel ? `• **Welcome Channel:** ${welcomeChannel}` : null,
+          boostChannel ? `• **Boost Channel:** ${boostChannel}` : null,
+        ].filter(Boolean);
+
+        if (statusUpdates.length === 0) {
+          return await interaction.editReply('⚠️ No channels were updated. Please select at least one channel option.');
+        }
+
+        return await interaction.editReply(`✅ **Configured Channels:**\n${statusUpdates.join('\n')}`);
+      }
+
       if (commandName === 'leaderboard') {
-        const sortedHelpers = [...helperPoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-        const sortedRequesters = [...userRequestCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+        const sortedHelpers = [...helperPoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
+        const sortedRequesters = [...userRequestCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
 
         const helpersStr = sortedHelpers.length > 0
           ? sortedHelpers.map(([id, pts], i) => `**${i + 1}.** <@${id}> — \`${pts} pts\``).join('\n')
@@ -657,7 +825,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           : 'No request data yet';
 
         const lbEmbed = new EmbedBuilder()
-          .setTitle('📊 Server Activity Leaderboard')
+          .setTitle('📊 Server Activity Leaderboard (Top 20)')
           .addFields(
             { name: '🏆 Top Helpers', value: helpersStr, inline: true },
             { name: '📩 Top Requesters', value: requestersStr, inline: true }
