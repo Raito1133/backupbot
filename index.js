@@ -838,7 +838,7 @@ client.once(Events.ClientReady, async () => {
   client.user.setPresence({
     status: 'idle',
     activities: [{
-      name: 'Im weird',
+      name: 'Sindria On Top',
       type: 5
     }]
   });
