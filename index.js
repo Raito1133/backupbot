@@ -165,7 +165,7 @@ async function updateLiveStatsMessage(guild) {
       .setDescription(
         `🎫 **\`${globalStats.totalTicketsCompleted}\`** tickets completed.\n` +
         `🏅 **\`${globalStats.totalPointsGiven}\`** points given out.\n\n` +
-        "A huge thank you to each and every one of you who made this possible! ❤️"
+        "The ticket status is updated automatically whenever a ticket is completed."
       )
       .setColor('#3498db')
       .setTimestamp();
@@ -225,10 +225,13 @@ function getPointsForTicket(ticketData, completedItems = null) {
   if (type === 'ultra_weeklies') {
     let totalPts = 0;
     for (const item of items) {
-      if (item.toLowerCase().includes('speaker')) {
-        totalPts += 5; 
+      const lowerItem = item.toLowerCase();
+      if (lowerItem.includes('speaker')) {
+        totalPts += 5; // Ultra Speaker = 5 pts
+      } else if (lowerItem.includes('gramiel') || lowerItem.includes('darkon')) {
+        totalPts += 4; // Ultra Gramiel & Darkon = 4 pts
       } else {
-        totalPts += 3; 
+        totalPts += 3; // Ultra Drakath, Dage, Drago, Nulgath = 3 pts
       }
     }
     return totalPts > 0 ? totalPts : 3 * itemCount;
@@ -631,7 +634,7 @@ const commands = [
     .addStringOption(opt => opt.setName('guest_btn_name').setDescription('Custom button name for Guest').setRequired(false))
     .addStringOption(opt => opt.setName('member_btn_name').setDescription('Custom button name for Member').setRequired(false))
     .addStringOption(opt => opt.setName('banner_url').setDescription('Top banner image URL').setRequired(false))
-    .addStringOption(opt => opt.setName('footer_banner_url').setDescription('Bottom banner image URL (Optional)').setRequired(false)),
+    .addStringOption(opt => opt.setName('footer_banner_url').setDescription('Bottom footer banner image URL').setRequired(false)),
 
   // --- /GIVEAWAY COMMAND ---
   new SlashCommandBuilder()
@@ -846,101 +849,50 @@ client.once(Events.ClientReady, async () => {
   await registerCommands();
 });
 
-// --- WELCOME & BOOST EVENT LISTENERS ---
+// --- WELCOME EVENT LISTENER (FIXED COMPONENTS V2) ---
 client.on(Events.GuildMemberAdd, async (member) => {
   if (member.guild.id !== GUILD_ID) return;
+  
+  const FIXED_WELCOME_CHANNEL_ID = '1529491496187724017';
   const cfg = guildSettings.get(member.guild.id) || {};
-  if (!cfg.welcomeChannelId) return;
+  const channelId = cfg.welcomeChannelId || FIXED_WELCOME_CHANNEL_ID;
 
-  const channel = member.guild.channels.cache.get(cfg.welcomeChannelId);
+  const channel = member.guild.channels.cache.get(channelId);
   if (!channel) return;
 
-  const welcomeData = cfg.welcomeData || {
-    outerMessage: 'Welcome to the server, {user}!',
-    title: 'New Member Joined!',
-    description: 'We are thrilled to have you here, {user}! Enjoy your stay at {server}.',
-    bannerUrl: STANDARD_BANNER_URL
-  };
-
-  const parsedOuter = parseVariables(welcomeData.outerMessage, member, member.guild);
-  const parsedTitle = parseVariables(welcomeData.title, member, member.guild);
-  const parsedDesc = parseVariables(welcomeData.description, member, member.guild);
+  const customBannerUrl = 'https://media.discordapp.net/attachments/1527957392523005972/1529507159262494812/cca68503-0ea7-44c1-a1bd-7c2a43f99589.png?ex=6a77f0cb&is=6a769f4b&hm=7435d239d560d6f18204a9c7e3e9d0d6afc4ca929d13496642067432590aa6a6&=&format=webp&quality=lossless&width=2048&height=1024';
 
   const container = {
     type: 17,
-    accent_color: 0x3498db,
+    accent_color: 0x98FB98,
     components: [
       {
         type: 12,
-        items: [{ media: { url: welcomeData.bannerUrl } }]
+        items: [{ media: { url: customBannerUrl } }]
       },
       {
-        type: 9,
-        components: [
-          {
-            type: 10,
-            content: `**${parsedTitle}**\n\n${parsedDesc}`
-          }
-        ]
+        type: 10,
+        content: `Hey there, <@${member.id}>! We're glad to have you here.\n\n` +
+                 `**Welcome to ${member.guild.name}!**\n\n` +
+                 ` **Get Verified to Unlock the Server!**\n` +
+                 `You currently have access to:\n\n` +
+                 ` **Read through our rule and community guidelines.** (<#1529492085848412303>)\n` +
+                 ` **Head over to <#1531294593780416743> to get Verified.**\n\n` +
+                 `You'll be asked to provide the following details:\n` +
+                 `> **AQW USERNAME:**\n` +
+                 `> **GUILD:**\n\n` +
+                 ` **Grab your roles in <#1529492494583337237> to customize your profile.**\n` +
+                 ` **Chat and hang out in <#1371775027258855467>.**\n\n` +
+                 `Once verified, you'll have full access!`
       }
     ]
   };
 
   await channel.send({
-    content: parsedOuter,
     components: [container],
     flags: MessageFlags.IsComponentsV2
   }).catch(console.error);
 });
-
-client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
-  if (newMember.guild.id !== GUILD_ID) return;
-  const wasBoosting = oldMember.premiumSince;
-  const isBoosting = newMember.premiumSince;
-
-  if (!wasBoosting && isBoosting) {
-    const cfg = guildSettings.get(newMember.guild.id) || {};
-    if (!cfg.boostChannelId) return;
-
-    const channel = newMember.guild.channels.cache.get(cfg.boostChannelId);
-    if (!channel) return;
-
-    const boostData = cfg.boostData || {
-      title: 'Server Boosted! 🚀',
-      description: 'Thank you {user} for boosting {server}!',
-      bannerUrl: STANDARD_BANNER_URL
-    };
-
-    const parsedTitle = parseVariables(boostData.title, newMember, newMember.guild);
-    const parsedDesc = parseVariables(boostData.description, newMember, newMember.guild);
-
-    const container = {
-      type: 17,
-      accent_color: 0xf47fff,
-      components: [
-        {
-          type: 12,
-          items: [{ media: { url: boostData.bannerUrl } }]
-        },
-        {
-          type: 9,
-          components: [
-            {
-              type: 10,
-              content: `**${parsedTitle}**\n\n${parsedDesc}`
-            }
-          ]
-        }
-      ]
-    };
-
-    await channel.send({
-      components: [container],
-      flags: MessageFlags.IsComponentsV2
-    }).catch(console.error);
-  }
-});
-
 // --- INTERACTION LISTENER ---
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.guild || interaction.guild.id !== GUILD_ID) return;
@@ -978,12 +930,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.reply({ content: '🎉 Successfully entered the giveaway! Good luck!', ephemeral: true });
     }
 
-    // --- VERIFICATION BUTTON TRIGGERS (WITH REJECTION BLOCK CHECK) ---
+    // --- VERIFICATION BUTTON TRIGGERS (WITH EPHEMERAL REJECTION MESSAGE) ---
     if (interaction.isButton() && interaction.customId.startsWith('btn_verify_guest_')) {
       if (userRejectionReasons.has(interaction.user.id)) {
         const reason = userRejectionReasons.get(interaction.user.id);
+        userRejectionReasons.delete(interaction.user.id); 
         return interaction.reply({ 
-          content: `❌ **You have been rejected from verifying.**\n\n**Reason:** ${reason}\n\nPlease address the reason above before attempting to verify again.`, 
+          content: `❌ **Your previous verification was rejected:**\n\n**Reason:** ${reason}\n\nPlease address the reason above and submit your verification form again.`, 
           ephemeral: true 
         });
       }
@@ -1026,8 +979,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton() && interaction.customId.startsWith('btn_verify_member_')) {
       if (userRejectionReasons.has(interaction.user.id)) {
         const reason = userRejectionReasons.get(interaction.user.id);
+        userRejectionReasons.delete(interaction.user.id); 
         return interaction.reply({ 
-          content: `❌ **You have been rejected from verifying.**\n\n**Reason:** ${reason}\n\nPlease address the reason above before attempting to verify again.`, 
+          content: `❌ **Your previous verification was rejected:**\n\n**Reason:** ${reason}\n\nPlease address the reason above and submit your verification form again.`, 
           ephemeral: true 
         });
       }
@@ -1100,17 +1054,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         components: [
           {
             type: 12,
+            items: [{ media: { url: STANDARD_BANNER_URL } }]
+          },
+          {
+            type: 12,
             items: [{ media: { url: userAvatar } }]
           },
           {
             type: 10,
-            content: `🛡️ **New Verification Request (GUEST)**\n\n` +
-                     `**User:** <@${interaction.user.id}>\n` +
-                     `**AQW Username:** [${ign}](${charPageUrl})\n` +
-                     `**Verification Type:** GUEST\n` +
-                     `**Guild:** ${guildName}\n` +
-                     `**Role To Give:** <@&${roleId}>\n` +
-                     `**Invited By:** ${invitedBy}`
+            content: `📋 **New GUEST Verification Request**\n\n` +
+                     `**User** | **AQW Username** | **Verification Type**\n` +
+                     `<@${interaction.user.id}> | [${ign}](${charPageUrl}) | GUEST\n\n` +
+                     `**Guild** | **Role To Give** | **Invited By**\n` +
+                     `${guildName} | <@&${roleId}> | ${invitedBy}`
           },
           {
             type: 1,
@@ -1182,17 +1138,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         components: [
           {
             type: 12,
+            items: [{ media: { url: STANDARD_BANNER_URL } }]
+          },
+          {
+            type: 12,
             items: [{ media: { url: userAvatar } }]
           },
           {
             type: 10,
-            content: `🛡️ **New Verification Request (MEMBER)**\n\n` +
-                     `**User:** <@${interaction.user.id}>\n` +
-                     `**AQW Username:** [${ign}](${charPageUrl})\n` +
-                     `**Verification Type:** MEMBER\n` +
-                     `**Guild:** Main Guild\n` +
-                     `**Role To Give:** <@&${roleId}>\n` +
-                     `**Invited By:** ${invitedBy}`
+            content: `📋 **New MEMBER Verification Request**\n\n` +
+                     `**User** | **AQW Username** | **Verification Type**\n` +
+                     `<@${interaction.user.id}> | [${ign}](${charPageUrl}) | MEMBER\n\n` +
+                     `**Guild** | **Role To Give** | **Invited By**\n` +
+                     `Main Guild | <@&${roleId}> | ${invitedBy}`
           },
           {
             type: 1,
@@ -1236,25 +1194,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const member = await interaction.guild.members.fetch(data.userId).catch(() => null);
         if (member) {
           await member.roles.add(data.roleId).catch(() => {});
-          // Awtomatikong palitan ang server nickname ng user sa kanilang AQW IGN
           await member.setNickname(data.ign).catch(err => console.log('Failed to set nickname:', err));
         }
 
         userRejectionReasons.delete(data.userId);
 
-        const approvedEmbed = new EmbedBuilder()
-          .setTitle('✅ Verification Approved')
-          .setDescription(`Approved by ${interaction.user}\n\n` +
-                        `**User:** <@${data.userId}>\n` +
-                        `**AQW Username:** [${data.ign}](${data.charPageUrl})\n` +
-                        `**Verification Type:** ${data.type}\n` +
-                        `**Role Given:** <@&${data.roleId}>\n` +
-                        `**Nickname Updated:** \`${data.ign}\``)
-          .setColor('#2ecc71')
-          .setTimestamp();
+        const userAvatar = interaction.message.components?.[1]?.items?.[0]?.media?.url || STANDARD_BANNER_URL;
+        const approvedContainer = {
+          type: 17,
+          accent_color: 0x2ecc71,
+          components: [
+            {
+              type: 12,
+              items: [{ media: { url: STANDARD_BANNER_URL } }]
+            },
+            {
+              type: 12,
+              items: [{ media: { url: userAvatar } }]
+            },
+            {
+              type: 10,
+              content: `📋 **Verification Approved**\n\n` +
+                       `**User** | **AQW Username** | **Verification Type**\n` +
+                       `<@${data.userId}> | [${data.ign}](${data.charPageUrl}) | ${data.type}\n\n` +
+                       `Approved by ${interaction.user} • <t:${Math.floor(Date.now() / 1000)}:R>`
+            }
+          ]
+        };
 
-        await interaction.update({ content: '✅ **Approved Successfully!**', components: [] });
-        await interaction.channel.send({ embeds: [approvedEmbed] });
+        await interaction.update({ components: [approvedContainer], flags: MessageFlags.IsComponentsV2 });
 
         if (member) {
           await member.send(`🎉 Your verification for **${interaction.guild.name}** has been **Approved**! Your nickname has been updated to **${data.ign}** and you have been given the role.`).catch(() => {});
@@ -1297,23 +1265,39 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       userRejectionReasons.set(data.userId, reason);
 
-      const rejectedEmbed = new EmbedBuilder()
-        .setTitle('❌ Verification Rejected')
-        .setDescription(`Rejected by ${interaction.user}\n\n` +
-                      `**User:** <@${data.userId}>\n` +
-                      `**AQW Username:** [${data.ign}](${data.charPageUrl})\n` +
-                      `**Verification Type:** ${data.type}\n` +
-                      `**Reason:** ${reason}`)
-        .setColor('#e74c3c')
-        .setTimestamp();
+      const userAvatar = interaction.message.components?.[1]?.items?.[0]?.media?.url || STANDARD_BANNER_URL;
+      const rejectedContainer = {
+        type: 17,
+        accent_color: 0xe74c3c,
+        components: [
+          {
+            type: 12,
+            items: [{ media: { url: STANDARD_BANNER_URL } }]
+          },
+          {
+            type: 12,
+            items: [{ media: { url: userAvatar } }]
+          },
+          {
+            type: 10,
+            content: `📋 **New ${data.type} Verification Request**\n\n` +
+                     `**User** | **AQW Username** | **Verification Type**\n` +
+                     `<@${data.userId}> | [${data.ign}](${data.charPageUrl}) | ${data.type}\n\n` +
+                     `**Guild** | **Role To Give** | **Invited By**\n` +
+                     `${data.guildName} | <@&${data.roleId}> | ${data.invitedBy}\n\n` +
+                     `**Rejection Reason**\n` +
+                     `${reason}\n\n` +
+                     `Rejected by ${interaction.user} • <t:${Math.floor(Date.now() / 1000)}:R>`
+          }
+        ]
+      };
 
-      await interaction.editReply({ content: '❌ **Request Rejected.**', components: [] });
-      await interaction.channel.send({ embeds: [rejectedEmbed] });
+      await interaction.editReply({ components: [rejectedContainer], flags: MessageFlags.IsComponentsV2 });
 
       try {
         const member = await interaction.guild.members.fetch(data.userId).catch(() => null);
         if (member) {
-          await member.send(`❌ Your verification for **${interaction.guild.name}** was **Rejected**. \n**Reason:** ${reason}`).catch(() => {});
+          await member.send(`❌ Your verification for **${interaction.guild.name}** was **Rejected**. \n**Reason:** ${reason}\n\nPlease address this reason and attempt to verify again.`).catch(() => {});
         }
       } catch {}
 
@@ -1368,7 +1352,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
     }
 
-    // STEP 1: Category Selected (Dropdown Menu Restored!)
+    // STEP 1: Category Selected (Dropdown Menu with custom exact sequence)
     if (interaction.isStringSelectMenu() && interaction.customId === 'select_ticket_cat') {
       const selectedKey = interaction.values[0];
       const preset = TICKET_PRESETS[selectedKey] || { label: 'Ticket', max: 6, points: 1, pingRoleIds: [HELPER_ROLE_ID] };
@@ -1378,12 +1362,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setCustomId('select_bosses_ultra_weeklies')
           .setPlaceholder('Select Ultra Weeklies bosses...')
           .setMinValues(1)
-          .setMaxValues(6)
+          .setMaxValues(7)
           .addOptions(
             new StringSelectMenuOptionBuilder().setLabel('Champion Drakath').setValue('Champion Drakath').setEmoji({ id: '1534544989009477754', name: 'drakath' }),
+            new StringSelectMenuOptionBuilder().setLabel('Ultra Drago').setValue('Ultra Drago').setEmoji({ id: '1534545063915290694', name: 'drago' }),
+            new StringSelectMenuOptionBuilder().setLabel('Ultra Nulgath').setValue('Ultra Nulgath').setEmoji({ id: '1534545036102995988', name: 'nulgath' }),
             new StringSelectMenuOptionBuilder().setLabel('Ultra Dage').setValue('Ultra Dage').setEmoji({ id: '1534544956713209877', name: 'dage' }),
             new StringSelectMenuOptionBuilder().setLabel('Ultra Darkon').setValue('Ultra Darkon').setEmoji({ id: '1534545103350272131', name: 'darkon' }),
-            new StringSelectMenuOptionBuilder().setLabel('Ultra Drago').setValue('Ultra Drago').setEmoji({ id: '1534545063915290694', name: 'drago' }),
             new StringSelectMenuOptionBuilder().setLabel('Ultra Gramiel').setValue('Ultra Gramiel').setEmoji({ id: '1534545007468613662', name: 'gramiel' }),
             new StringSelectMenuOptionBuilder().setLabel('Ultra Speaker').setValue('Ultra Speaker').setEmoji({ id: '1534545145016352778', name: 'malgor' })
           );
@@ -1492,7 +1477,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('select_bosses_')) {
       const categoryKey = interaction.customId.replace('select_bosses_', '');
       const selectedBosses = interaction.values.join(', ');
-      
+       
       tempTicketCache.set(interaction.user.id, { categoryKey, bosses: selectedBosses });
 
       const serverMenu = new StringSelectMenuBuilder()
@@ -1552,13 +1537,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setPlaceholder('Add extra details (optional)...')
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(false);
-      
+       
       const modalComps = [
         new ActionRowBuilder().addComponents(ignInput), 
         new ActionRowBuilder().addComponents(mapInput),
         new ActionRowBuilder().addComponents(detailsInput)
       ];
-      
+       
       if (!bossVal) {
         const descInput = new TextInputBuilder()
           .setCustomId('description')
@@ -1628,12 +1613,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setCustomId('active_change_bosses_selected_ultra_weeklies')
           .setPlaceholder('Select Ultra Weeklies bosses...')
           .setMinValues(1)
-          .setMaxValues(6)
+          .setMaxValues(7)
           .addOptions(
             new StringSelectMenuOptionBuilder().setLabel('Champion Drakath').setValue('Champion Drakath').setEmoji({ id: '1534544989009477754', name: 'drakath' }),
+            new StringSelectMenuOptionBuilder().setLabel('Ultra Drago').setValue('Ultra Drago').setEmoji({ id: '1534545063915290694', name: 'drago' }),
+            new StringSelectMenuOptionBuilder().setLabel('Ultra Nulgath').setValue('Ultra Nulgath').setEmoji({ id: '1534545036102995988', name: 'nulgath' }),
             new StringSelectMenuOptionBuilder().setLabel('Ultra Dage').setValue('Ultra Dage').setEmoji({ id: '1534544956713209877', name: 'dage' }),
             new StringSelectMenuOptionBuilder().setLabel('Ultra Darkon').setValue('Ultra Darkon').setEmoji({ id: '1534545103350272131', name: 'darkon' }),
-            new StringSelectMenuOptionBuilder().setLabel('Ultra Drago').setValue('Ultra Drago').setEmoji({ id: '1534545063915290694', name: 'drago' }),
             new StringSelectMenuOptionBuilder().setLabel('Ultra Gramiel').setValue('Ultra Gramiel').setEmoji({ id: '1534545007468613662', name: 'gramiel' }),
             new StringSelectMenuOptionBuilder().setLabel('Ultra Speaker').setValue('Ultra Speaker').setEmoji({ id: '1534545145016352778', name: 'malgor' })
           );
@@ -1792,7 +1778,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         const cfg = guildSettings.get(interaction.guild.id) || {};
-        
+         
         ticketCounter += 1;
         const formattedNum = String(ticketCounter).padStart(4, '0');
         const chName = `ticket-${formattedNum}`;
@@ -1806,7 +1792,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         const isServerTicket = ticketType === 'server_ticket';
-        
+         
         let permissionOverwrites = [
           { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.ManageMessages] },
           { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
@@ -1845,7 +1831,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const validRoleIds = pingRoleIds.filter(id => id && /^\d+$/.test(id));
         const helperRolePings = validRoleIds.length > 0 ? validRoleIds.map(id => `<@&${id}>`).join(' ') : '@Staff';
-        
+         
         await ticketChannel.send({ 
           content: `${helperRolePings} assistance requested!`,
           allowedMentions: validRoleIds.length > 0 ? { roles: validRoleIds } : { parse: ['users', 'roles'] }
@@ -2100,7 +2086,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
 
         if (!member) return await interaction.reply({ content: '❌ User not found in this server.', ephemeral: true });
-        
+         
         await member.kick(reason).catch(err => {
           return interaction.reply({ content: `❌ Failed to kick user: ${err.message}`, ephemeral: true });
         });
@@ -2463,7 +2449,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (commandName === 'stats') {
         const customMessage = options.getString('custom_message');
-        const defaultFooterMessage = "A huge thank you to each and every one of you who made this possible! ❤️";
+        const defaultFooterMessage = "The ticket status is updated automatically whenever a ticket is completed.";
 
         const statsEmbed = new EmbedBuilder()
           .setTitle(`Ticket stats`)
@@ -2481,13 +2467,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (commandName === 'setup-stats') {
         await interaction.deferReply({ ephemeral: true });
         const channel = options.getChannel('channel');
-        
+         
         const statsEmbed = new EmbedBuilder()
           .setTitle(`Ticket stats`)
           .setDescription(
             `🎫 **\`${globalStats.totalTicketsCompleted}\`** tickets completed.\n` +
             `🏅 **\`${globalStats.totalPointsGiven}\`** points given out.\n\n` +
-            "A huge thank you to each and every one of you who made this possible! ❤️"
+            "The ticket status is updated automatically whenever a ticket is completed."
           )
           .setColor('#3498db')
           .setTimestamp();
@@ -2561,7 +2547,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         const title = options.getString('title');
-        const description = options.getString('description').replace(/\\n/g, '\n');
+        const description = options.getString('description');
         const bannerUrl = options.getString('banner_url') || STANDARD_BANNER_URL;
 
         const sections = [];
@@ -2570,7 +2556,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         for (let i = 1; i <= 7; i++) {
           const role = options.getRole(`role${i}`);
           const desc = options.getString(`desc${i}`);
-          
+           
           if (role && desc) {
             if (usedRoleIds.has(role.id)) continue;
             usedRoleIds.add(role.id);
